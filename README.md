@@ -139,31 +139,30 @@ captures d'écran des fiches d'ateliers.
 
 ### Permissions sur le bind-mount backend (host UID ≠ 1000)
 
-`make up` baky les UID/GID dans l'image backend pour que PHP-FPM puisse
-écrire dans `./backend` (logs, cache de vues, storage). Les valeurs
-viennent de `.env` (défaut `1000:1000`, cf. `.env.example`).
+`make up` détecte automatiquement ton UID/GID hôte (`id -u` / `id -g`)
+et rebuild l'image backend si elle a été bakée pour un autre UID
+(marqueur posé via `LABEL resonance.host.uid` dans le Dockerfile). PHP-FPM
+tourne donc toujours en utilisateur aligné sur l'hôte, et écrit sans
+problème dans le bind-mount `./backend` (storage/, bootstrap/cache/, logs/).
 
-Si ton UID hôte n'est pas 1000 (cas fréquent sur Mac, ou sur Linux
-multi-utilisateurs), tu auras :
-
-- pendant `make up` :
-  `/app/vendor does not exist and could not be created` (composer install
-  ne peut pas créer `vendor/` dans le bind-mount).
-- ou plus tard, au runtime :
-  `Permission denied` sur `storage/logs/laravel.log` ou
-  `bootstrap/cache/views/…`.
-
-Correction :
+Si tu invoques `docker compose` directement (hors Make), exporte d'abord
+tes UID/GID pour éviter le mismatch :
 
 ```bash
-# Mets ton UID/GID hôte dans .env (racine du repo)
-echo "UID=$(id -u)" >> .env
-echo "GID=$(id -g)" >> .env
-
-# Rebuild l'image backend (les UID/GID sont des build args)
+export UID=$(id -u) GID=$(id -g)
 docker compose build backend
-make up
+docker compose up -d
 ```
+
+Symptômes d'un mismatch non corrigé (au cas où tu rencontres ces erreurs
+malgré le auto-détect) :
+
+- pendant l'install :
+  `/app/vendor does not exist and could not be created`.
+- au runtime :
+  `Permission denied` sur `storage/logs/laravel.log` ou `bootstrap/cache/…`.
+
+Dans ce cas, force un rebuild propre : `docker compose build --no-cache backend && make up`.
 
 ### Bascule entre branches (`main` ↔ `final` ↔ `solution/jX-…`)
 

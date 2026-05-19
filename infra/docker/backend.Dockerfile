@@ -97,6 +97,15 @@ RUN { \
 ARG UID=1000
 ARG GID=1000
 
+# Labels exposant les UID/GID bakés. Le Makefile s'en sert pour détecter
+# qu'une image cache locale a été buildée pour un autre UID que celui du
+# host courant (e.g. clone partagé entre dev Linux UID=1000 et dev Mac
+# UID=501) et déclencher un rebuild automatique. Sans ces labels, FPM
+# tournerait en UID bakée et échouerait à écrire dans le bind-mount
+# `./backend` (storage/, bootstrap/cache/) avec "Permission denied".
+LABEL resonance.host.uid="${UID}"
+LABEL resonance.host.gid="${GID}"
+
 RUN set -eux; \
     addgroup -g "${GID}" -S app; \
     adduser -u "${UID}" -G app -s /bin/bash -D app; \

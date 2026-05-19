@@ -21,6 +21,15 @@ export
 NGINX_PORT ?= 8080
 FRONTEND_PORT ?= 3000
 
+# UID/GID host : on les force ici (override la valeur éventuelle de .env)
+# pour que l'image backend soit toujours buildée avec un user `app` aligné
+# sur l'hôte. Sans ça, un .env recopié de .env.example (hardcodé 1000:1000)
+# fait planter FPM en runtime avec "Permission denied" sur storage/logs/ ou
+# bootstrap/cache/ dès que le host UID ≠ 1000 (cas typique Mac : 501).
+# Docker Compose hérite ces valeurs comme env vars (cf. `export` ci-dessus).
+override UID := $(shell id -u)
+override GID := $(shell id -g)
+
 # URL host du frontal Resonance, dérivée de NGINX_PORT. Utilisée par les
 # cibles de mesure (`make lighthouse`). Override possible :
 #   RESONANCE_BASE_URL=http://other:port make lighthouse
@@ -70,6 +79,12 @@ ensure-images:
 	@if ! docker image inspect resonance/backend:dev >/dev/null 2>&1; then \
 		echo "→ Image resonance/backend:dev absente, build initial (1-2 min)..."; \
 		$(COMPOSE) build backend; \
+	else \
+		BAKED_UID=$$(docker image inspect resonance/backend:dev --format='{{index .Config.Labels "resonance.host.uid"}}' 2>/dev/null); \
+		if [ "$$BAKED_UID" != "$(UID)" ]; then \
+			echo "→ Image backend bakée pour UID=$$BAKED_UID ≠ host UID=$(UID), rebuild (1-2 min)..."; \
+			$(COMPOSE) build backend; \
+		fi; \
 	fi
 	@if ! docker image inspect resonance/frontend:starter >/dev/null 2>&1; then \
 		echo "→ Image resonance/frontend:starter absente, build initial (1-2 min)..."; \
@@ -94,9 +109,6 @@ ensure-images:
 # est redirigé vers /tmp car /home/app/.composer est owned par UID 1000.
 # Idempotent : chaque bloc est conditionnel et silencieux si l'artefact
 # est déjà là.
-HOST_UID := $(shell id -u)
-HOST_GID := $(shell id -g)
-
 .PHONY: ensure-backend-deps
 ensure-backend-deps:
 	@if [ ! -f backend/.env ]; then \
@@ -106,14 +118,14 @@ ensure-backend-deps:
 	@if [ ! -f backend/vendor/autoload.php ]; then \
 		echo "→ backend/vendor absent, composer install (1-2 min)..."; \
 		$(COMPOSE) run --rm --no-deps \
-		  -u "$(HOST_UID):$(HOST_GID)" \
+		  -u "$(UID):$(GID)" \
 		  -e COMPOSER_HOME=/tmp/composer \
 		  backend composer install --no-interaction --prefer-dist --no-progress; \
 	fi
 	@if ! grep -qE "^APP_KEY=base64:" backend/.env; then \
 		echo "→ APP_KEY absent dans backend/.env, génération..."; \
 		$(COMPOSE) run --rm --no-deps \
-		  -u "$(HOST_UID):$(HOST_GID)" \
+		  -u "$(UID):$(GID)" \
 		  backend php artisan key:generate --force; \
 	fi
 

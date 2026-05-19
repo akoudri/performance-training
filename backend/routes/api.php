@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Organizer\MediaController as OrganizerMediaContr
 use App\Http\Controllers\Api\V1\Organizer\ParticipantsController as OrganizerParticipantsController;
 use App\Http\Controllers\Api\V1\Organizer\StatsController as OrganizerStatsController;
 use App\Http\Controllers\Api\V1\TicketController;
+use App\Http\Middleware\SetEventsCacheControl;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -23,9 +24,15 @@ use Illuminate\Support\Facades\Route;
 
 // ---- Public ---------------------------------------------------------------
 
-Route::get('/events', [EventController::class, 'index']);
-Route::get('/events/{slug}', [EventController::class, 'show']);
-Route::get('/events/{slug}/sessions', [EventController::class, 'sessions']);
+// @perf-fix: solution/j1-cdn-cache — Cache-Control HTTP sur les endpoints
+// publics de découverte (liste max-age=60 / fiche max-age=300, +
+// stale-while-revalidate). Les headers s'adressent au browser ET à un cache
+// partagé éventuel (s-maxage). Cf. App\Http\Middleware\SetEventsCacheControl.
+Route::middleware(SetEventsCacheControl::class)->group(function (): void {
+    Route::get('/events', [EventController::class, 'index']);
+    Route::get('/events/{slug}', [EventController::class, 'show']);
+    Route::get('/events/{slug}/sessions', [EventController::class, 'sessions']);
+});
 
 // ---- Auth -----------------------------------------------------------------
 

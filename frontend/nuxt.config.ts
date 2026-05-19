@@ -1,12 +1,11 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 //
-// Resonance — frontend starter (cf. resonance-spec.md §8).
-// Configuration volontairement minimaliste : pas de @nuxt/image, pas de
-// @nuxt/fonts, pas de routeRules — toutes ces optims sont introduites dans
-// les branches solution/jX-name.
+// Resonance — frontend (branche solution/j1-cdn-cache).
+// Configuration toujours minimaliste sur le bundle (pas de @nuxt/image,
+// pas de @nuxt/fonts — réservés à solution/j2-bundle), mais elle gagne
+// désormais les `routeRules` ISR/SWR de J1.
 //
-// @perf-debt: pas de routeRules / ISR / SWR — résolu en J1 atelier
-// "j1-cdn-cache".
+// @perf-fix: routeRules ISR/SWR — solution/j1-cdn-cache (cf. ci-dessous).
 // @perf-debt: pas de @nuxt/image — résolu en J2 atelier "j2-bundle".
 // @perf-debt: pas de @nuxt/fonts — résolu en J2 atelier "j2-bundle".
 
@@ -19,6 +18,36 @@ export default defineNuxtConfig({
     '@pinia/nuxt',
     '@nuxt/eslint',
   ],
+
+  // ---- routeRules — cache applicatif Nitro (solution/j1-cdn-cache) -----
+  // Nitro applique la règle la plus spécifique (`/events` exact gagne sur
+  // `/events/**`).
+  //
+  // Mécanisme : `swr: <n>` (Stale-While-Revalidate) génère un
+  // `cachedEventHandler` runtime → cache HTML rendu **en mémoire côté
+  // serveur Node**, pas seulement `Cache-Control` envoyé au browser.
+  // Conséquence : k6 (qui n'a pas de cache client) bénéficie aussi du
+  // cache dès le 2ᵉ hit dans la fenêtre TTL — c'est ce qui débloque la
+  // cible « k6 home p95 < 2 s ».
+  //
+  // Pourquoi pas `isr` ? Sur preset `node-server` (notre déploiement),
+  // `isr` est un no-op runtime : Nitro ne génère un `cache:` block que
+  // pour `swr`. `isr` est conçu pour les presets edge (Vercel,
+  // Cloudflare Workers) où la plateforme gère le cache. Cf. note
+  // technique de la fiche atelier `docs/ateliers/j1-cdn-cache.md`.
+  //
+  // Note `/api/**` : aucune `routeRule` ici. Les requêtes `/api/*` sont
+  // servies par Laravel via Nginx FastCGI — elles n'atteignent **pas**
+  // le serveur Nitro de Nuxt. Une `{ cors: true }` sur `/api/**` serait
+  // un no-op fonctionnel. Le CORS éventuel se gère côté Laravel
+  // (config/cors.php) ; le caching applicatif des réponses API est porté
+  // par le middleware Laravel `SetEventsCacheControl` (Cache-Control HTTP).
+  routeRules: {
+    '/': { swr: 60 },
+    '/events': { swr: 60 },
+    '/events/**': { swr: 300 },
+    '/organizer/**': { ssr: false },
+  },
 
   typescript: {
     strict: true,

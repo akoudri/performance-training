@@ -86,8 +86,17 @@ ensure-images:
 #   - APP_KEY dans backend/.env (sans lui, Laravel jette "No application
 #     encryption key has been specified.").
 # `run --rm --no-deps` : container éphémère, ne démarre pas postgres/redis
-# pour ce setup (composer + key:generate sont autosuffisants). Idempotent :
-# chaque bloc est conditionnel et silencieux si l'artefact est déjà là.
+# pour ce setup (composer + key:generate sont autosuffisants). On force le
+# user à l'UID/GID de l'hôte (et non `app` bakée à 1000 dans l'image) pour
+# que les fichiers créés dans le bind-mount appartiennent à l'utilisateur
+# hôte — sans ça, `mkdir vendor` échoue sur tout host dont l'UID ≠ 1000
+# ("/app/vendor does not exist and could not be created"). COMPOSER_HOME
+# est redirigé vers /tmp car /home/app/.composer est owned par UID 1000.
+# Idempotent : chaque bloc est conditionnel et silencieux si l'artefact
+# est déjà là.
+HOST_UID := $(shell id -u)
+HOST_GID := $(shell id -g)
+
 .PHONY: ensure-backend-deps
 ensure-backend-deps:
 	@if [ ! -f backend/.env ]; then \
@@ -96,11 +105,16 @@ ensure-backend-deps:
 	fi
 	@if [ ! -f backend/vendor/autoload.php ]; then \
 		echo "→ backend/vendor absent, composer install (1-2 min)..."; \
-		$(COMPOSE) run --rm --no-deps -u app backend composer install --no-interaction --prefer-dist --no-progress; \
+		$(COMPOSE) run --rm --no-deps \
+		  -u "$(HOST_UID):$(HOST_GID)" \
+		  -e COMPOSER_HOME=/tmp/composer \
+		  backend composer install --no-interaction --prefer-dist --no-progress; \
 	fi
 	@if ! grep -qE "^APP_KEY=base64:" backend/.env; then \
 		echo "→ APP_KEY absent dans backend/.env, génération..."; \
-		$(COMPOSE) run --rm --no-deps -u app backend php artisan key:generate --force; \
+		$(COMPOSE) run --rm --no-deps \
+		  -u "$(HOST_UID):$(HOST_GID)" \
+		  backend php artisan key:generate --force; \
 	fi
 
 .PHONY: down

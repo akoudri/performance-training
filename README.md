@@ -137,6 +137,34 @@ captures d'écran des fiches d'ateliers.
 
 ## Dépannage
 
+### Permissions sur le bind-mount backend (host UID ≠ 1000)
+
+`make up` baky les UID/GID dans l'image backend pour que PHP-FPM puisse
+écrire dans `./backend` (logs, cache de vues, storage). Les valeurs
+viennent de `.env` (défaut `1000:1000`, cf. `.env.example`).
+
+Si ton UID hôte n'est pas 1000 (cas fréquent sur Mac, ou sur Linux
+multi-utilisateurs), tu auras :
+
+- pendant `make up` :
+  `/app/vendor does not exist and could not be created` (composer install
+  ne peut pas créer `vendor/` dans le bind-mount).
+- ou plus tard, au runtime :
+  `Permission denied` sur `storage/logs/laravel.log` ou
+  `bootstrap/cache/views/…`.
+
+Correction :
+
+```bash
+# Mets ton UID/GID hôte dans .env (racine du repo)
+echo "UID=$(id -u)" >> .env
+echo "GID=$(id -g)" >> .env
+
+# Rebuild l'image backend (les UID/GID sont des build args)
+docker compose build backend
+make up
+```
+
 ### Bascule entre branches (`main` ↔ `final` ↔ `solution/jX-…`)
 
 Trois artefacts ne suivent pas `git checkout` et peuvent rendre le

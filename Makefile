@@ -50,7 +50,7 @@ env: ## Crée .env depuis .env.example si absent
 # ----- Cycle de vie de la stack ----------------------------------------------
 
 .PHONY: up
-up: env ## Démarre toute la stack en arrière-plan
+up: env ensure-images ## Démarre toute la stack en arrière-plan
 	$(COMPOSE) up -d
 	@echo ""
 	@echo "Stack démarrée. Services :"
@@ -59,6 +59,22 @@ up: env ## Démarre toute la stack en arrière-plan
 	@echo "  - MinIO API   → http://localhost:$${MINIO_API_PORT:-9000}"
 	@echo "  - MinIO UI    → http://localhost:$${MINIO_CONSOLE_PORT:-9001}"
 	@echo "  - Mailpit UI  → http://localhost:$${MAILPIT_UI_PORT:-8025}"
+
+# Build initial des images locales (backend/frontend) si absentes du cache
+# Docker. Sans ce garde-fou, `docker compose up` tente de PULL les images
+# `resonance/backend:dev` et `resonance/frontend:starter` depuis Docker Hub
+# (où elles n'existent pas) → "pull access denied". No-op silencieuse quand
+# les images sont déjà présentes (cas nominal après le premier `make up`).
+.PHONY: ensure-images
+ensure-images:
+	@if ! docker image inspect resonance/backend:dev >/dev/null 2>&1; then \
+		echo "→ Image resonance/backend:dev absente, build initial (1-2 min)..."; \
+		$(COMPOSE) build backend; \
+	fi
+	@if ! docker image inspect resonance/frontend:starter >/dev/null 2>&1; then \
+		echo "→ Image resonance/frontend:starter absente, build initial (1-2 min)..."; \
+		$(COMPOSE) build frontend; \
+	fi
 
 .PHONY: down
 down: ## Arrête la stack (volumes conservés)

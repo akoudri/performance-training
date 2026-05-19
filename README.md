@@ -36,12 +36,19 @@ chacune correspondant à un atelier.
 
 ```bash
 cp .env.example .env
+cp backend/.env.example backend/.env
 make up
+make seed-light          # migrate:fresh + seed (cf. "Données" plus bas)
 ```
 
 Le premier `make up` builde les images backend (PHP-FPM) et frontend
 (multi-stage Nuxt build prod), ce qui peut prendre 1-3 minutes. Les
 fois suivantes, c'est instantané.
+
+> **Note** : `make up` ne copie que `.env` à la racine (via la cible
+> `make env`). Le `backend/.env` est gitignoré et doit être copié
+> manuellement depuis `backend/.env.example`. Sans lui, Laravel
+> démarre avec une config par défaut incohérente avec la stack Docker.
 
 Une fois la stack démarrée, les services suivants sont accessibles :
 
@@ -127,4 +134,34 @@ captures d'écran des fiches d'ateliers.
 - `docs/ateliers/` - fiches d'ateliers (à venir, phase 6 du scaffold).
 - `docs/architecture.md` - vue d'ensemble technique (à venir).
 - `docs/benchmarks/` - captures Lighthouse avant/après par atelier (à venir).
+
+## Dépannage
+
+### Bascule entre branches (`main` ↔ `final` ↔ `solution/jX-…`)
+
+Trois artefacts ne suivent pas `git checkout` et peuvent rendre le
+backend HS lors d'un changement de branche :
+
+| Artefact | Symptôme | Correction |
+|---|---|---|
+| `backend/bootstrap/cache/*.php` (gitignoré) | Backend en boucle de restart, `include(…/HorizonServiceProvider.php): No such file` (ou autre provider absent) | `rm backend/bootstrap/cache/{config,services,packages,routes-v7,events}.php` |
+| Image Docker `resonance/backend:dev` (cache local) | Nginx → 502 ; container `Up` mais `php-fpm` absent (CMD différent, port 9000 non écouté) | `docker compose build backend` puis `docker compose up -d backend` |
+| `backend/.env` (gitignoré) | `SQLSTATE … could not translate host name "pgbouncer"` ou config queue/cache incohérente | `cp backend/.env.example backend/.env` (re-générer l'`APP_KEY` avec `make artisan cmd="key:generate"` si besoin) |
+
+`final` introduit PgBouncer, Redis (queue+cache), Octane/FrankenPHP et
+Horizon — tous absents de `main`. Le cache Laravel et l'image Docker
+buildés sur `final` deviennent invalides sur `main` mais Docker et
+Laravel les réutilisent silencieusement.
+
+### Reset complet "starter"
+
+Pour revenir à un état starter propre depuis n'importe quelle branche :
+
+```bash
+rm -f backend/bootstrap/cache/{config,services,packages,routes-v7,events}.php
+cp backend/.env.example backend/.env
+docker compose build backend
+make up
+make seed-light
+```
 

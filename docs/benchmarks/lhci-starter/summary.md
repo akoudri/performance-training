@@ -2,7 +2,7 @@
 
 > Audit Mobile / Slow 4G / 4× CPU throttling, 3 runs par URL, run
 > représentatif sélectionné par LHCI (médiane). Mesures réalisées le
-> **2026-05-08** sur la branche `main`, derrière le frontal Nginx,
+> **2026-05-19** sur la branche `main`, derrière le frontal Nginx,
 > avec dataset **fraîchement restauré** via le pre-hook `make restore`
 > intégré à la cible `make lighthouse`.
 
@@ -30,22 +30,29 @@ pagination).
 | URL                                         | Performance | Accessibility | Best Practices | SEO  |
 |---------------------------------------------|------------:|--------------:|---------------:|-----:|
 | `/` (accueil)                               |    **0.55** |          0.94 |           1.00 | 1.00 |
-| `/events/{star-slug}` (fiche événement)     |    **0.91** |          0.87 |           0.96 | 1.00 |
+| `/events/{star-slug}` (fiche événement)     |    **0.76** |          0.87 |           0.96 | 1.00 |
 
-3 runs par URL : home perf stable à 0.55 ; fiche perf 0.89-0.91.
+3 runs par URL : home perf stable à 0.55 (3 runs identiques) ; fiche
+perf 0.76-0.77.
 
 ## Web Vitals (run représentatif)
 
 | Métrique                | Home (`/`) | Fiche événement |
 |-------------------------|-----------:|----------------:|
-| LCP                     | **16.3 s** |       **3.0 s** |
-| FCP                     |     15.9 s |           2.4 s |
-| TTFB (server response)  |      2.3 s |           62 ms |
+| LCP                     | **23.0 s** |       **5.0 s** |
+| FCP                     |     15.9 s |           3.0 s |
+| Speed Index             |     15.9 s |           3.0 s |
+| TTI                     |     23.2 s |           5.0 s |
+| TBT                     |      10 ms |            0 ms |
+| CLS                     |      0.001 |           0.001 |
+| TTFB (server response)  |      1.6 s |           70 ms |
+| Total byte weight       | 7 110 KiB  |        695 KiB  |
 
 **Lecture** : la home reste très pénalisée parce que son SSR fetche
 `/api/v1/events` (≈ 4 Mo de JSON sans pagination) avant de rendre le
-HTML. La fiche événement n'a qu'un seul event à fetcher → TTFB 62 ms
-et LCP 3.0 s limité par le poids de l'image hero JPEG full-size
+HTML, et la page liste images full-size de tous les events visibles.
+La fiche événement n'a qu'un seul event à fetcher → TTFB 70 ms et
+LCP 5.0 s limité par le poids de l'image hero JPEG full-size
 (cf. `@perf-debt` images frontend, résolu en J2).
 
 ## Fichiers
@@ -65,9 +72,20 @@ catégorie *concert*).
 | Métrique                | Starter (mesuré) | Cible final §9 |
 |-------------------------|-----------------:|---------------:|
 | Score Performance home  |             0.55 |          ≥ 0.90 |
-| Score Performance event |             0.91 |          ≥ 0.90 |
-| LCP fiche événement     |            3.0 s |         < 1.5 s |
+| Score Performance event |             0.76 |          ≥ 0.90 |
+| LCP fiche événement     |            5.0 s |         < 1.5 s |
 
 L'écart vers la cible final reste large sur le **bundle**, le
 **caching HTTP**, l'**eager loading** côté Laravel et les **index
 Postgres** — chacun couvert par une branche `solution/jX-name`.
+
+## Historique
+
+- 2026-05-08 : baseline initiale (home perf 0.55, event 0.91, LCP home
+  16.3 s). Mesurée sur un host plus rapide ; les chiffres bruts varient
+  ±20 % d'une machine à l'autre, mais les **écarts entre starter et
+  branches solution** restent stables.
+- 2026-05-19 : refresh sur host actuel (event LCP 5.0 s, home LCP 23 s).
+  Home perf reste pile à 0.55 → confirme que le contrat starter
+  (pas de pagination, pas de cache HTTP, bundle non optimisé) est
+  reproductible quelle que soit la machine.

@@ -1,0 +1,33 @@
+{
+  "name": "frontend",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint .",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@pinia/nuxt": "latest",
+    "chart.js": "latest",
+    "nuxt": "latest",
+    "pinia": "latest",
+    "qrcode": "latest",
+    "vue": "latest",
+    "vue-chartjs": "latest",
+    "vue-router": "latest"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "latest",
+    "@nuxtjs/tailwindcss": "latest",
+    "@types/qrcode": "latest",
+    "eslint": "latest",
+    "tailwindcss": "^3",
+    "typescript": "latest",
+    "vue-tsc": "latest"
+  }
+}

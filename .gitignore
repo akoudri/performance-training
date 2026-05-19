@@ -1,0 +1,81 @@
+# ---- Environment & secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Laravel ----
+/backend/vendor/
+/backend/node_modules/
+/backend/public/build/
+/backend/public/hot
+/backend/public/storage
+/backend/storage/*.key
+/backend/storage/app/public/*
+!/backend/storage/app/public/.gitkeep
+/backend/storage/framework/cache/data/*
+/backend/storage/framework/sessions/*
+/backend/storage/framework/testing/*
+/backend/storage/framework/views/*
+/backend/storage/logs/*
+!/backend/storage/**/.gitkeep
+/backend/bootstrap/cache/*.php
+/backend/.phpunit.cache
+/backend/.phpunit.result.cache
+/backend/Homestead.json
+/backend/Homestead.yaml
+/backend/auth.json
+
+# ---- Nuxt / Node ----
+node_modules/
+/frontend/.nuxt/
+/frontend/.output/
+/frontend/.data/
+/frontend/.cache/
+/frontend/dist/
+/frontend/.nitro/
+/frontend/.vercel/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Build & coverage ----
+/coverage/
+*.lcov
+
+# ---- IDE / éditeurs ----
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Docker volumes locaux (si bind-mount) ----
+/docker-data/
+
+# ---- Dumps & artefacts générés ----
+/infra/seeds-dump/*.sql
+# Cache des images placeholders (téléchargées à la demande depuis picsum.photos).
+/infra/seeds-dump/media/*
+!/infra/seeds-dump/media/.gitkeep
+# realistic.sql.gz : tracké directement (≈ 11 MiB, sous la limite GitHub 50 Mo).
+# Si la taille dépasse 50 Mo après ajout d'index/données : passer à Git LFS.
+
+# ---- Outils de mesure ----
+# Lighthouse CI : cache local + rapports volatils.
+/.lighthouseci/
+/load-tests/lighthouse/.lighthouseci/
+/load-tests/lighthouse/reports/
+/docs/benchmarks/lighthouse-latest/
+# k6 : résultats volatils.
+/load-tests/k6/results/
+/docs/benchmarks/k6-latest/
+
+# ---- Tests ----
+.phpunit.result.cache

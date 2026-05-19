@@ -1,0 +1,23 @@
+# Sortie Nuxt et caches : ne JAMAIS embarquer dans le contexte de build.
+# Le `.output/` est régénéré dans le stage builder via `npm run build`.
+.output
+.data
+.nuxt
+.nitro
+.cache
+dist
+
+# Dépendances : reinstallées dans le stage builder via `npm ci`.
+node_modules
+
+# Logs et fichiers OS
+logs
+*.log
+.DS_Store
+.fleet
+.idea
+
+# Env locaux (ne pas embarquer ; ils sont injectés par Compose au runtime).
+.env
+.env.*
+!.env.example

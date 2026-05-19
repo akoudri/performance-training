@@ -1,0 +1,70 @@
+<script setup lang="ts">
+// @perf-debt: Chart.js importé statiquement dans le layout — donc inclus dans
+// le bundle initial de TOUTES les pages organisateur, pas juste celles qui
+// affichent un graphe. ~200 Ko de JS chargés inutilement par le navigateur
+// pour /organizer/events ou /organizer/events/[id]/participants.
+// Résolu en J2 atelier "j2-bundle" : remplacement par un
+// `defineAsyncComponent` ciblé dans la page dashboard uniquement.
+import {
+  Chart,
+  LineController,
+  LineElement,
+  PointElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+  Filler,
+} from 'chart.js'
+
+Chart.register(
+  LineController,
+  LineElement,
+  PointElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+  Filler,
+)
+</script>
+
+<template>
+  <div class="min-h-screen flex flex-col bg-slate-50 text-slate-900 font-sans">
+    <header class="bg-slate-900 text-white">
+      <div class="mx-auto max-w-7xl px-4 py-4 flex items-center gap-6">
+        <NuxtLink to="/organizer/dashboard" class="text-lg font-bold tracking-tight">
+          Resonance · Espace organisateur
+        </NuxtLink>
+        <nav class="flex items-center gap-4 text-sm text-slate-200">
+          <NuxtLink to="/organizer/dashboard" class="hover:text-white">
+            Dashboard
+          </NuxtLink>
+          <NuxtLink to="/organizer/events" class="hover:text-white">
+            Événements
+          </NuxtLink>
+        </nav>
+        <div class="ml-auto">
+          <NuxtLink to="/" class="text-sm text-slate-300 hover:text-white">
+            ← Retour au site
+          </NuxtLink>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1">
+      <!-- Tout l'espace organisateur est rendu côté client (pas d'SSR
+           pour le back-office) — équivalent au `routeRules: { ssr: false }`
+           prévu en final. Pas de routeRules ici (interdit par §8) : on isole
+           dans <ClientOnly>. -->
+      <ClientOnly>
+        <slot />
+        <template #fallback>
+          <div class="mx-auto max-w-7xl px-4 py-10 text-slate-500">
+            Chargement de l'espace organisateur…
+          </div>
+        </template>
+      </ClientOnly>
+    </main>
+  </div>
+</template>

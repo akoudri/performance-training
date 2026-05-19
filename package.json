@@ -1,0 +1,8 @@
+{
+  "name": "resonance",
+  "private": true,
+  "description": "Resonance — repo racine, sert uniquement à héberger les outils de mesure (Lighthouse CI). L'app Nuxt vit dans frontend/, l'app Laravel dans backend/.",
+  "devDependencies": {
+    "@lhci/cli": "latest"
+  }
+}

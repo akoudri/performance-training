@@ -1,0 +1,74 @@
+[
+  {
+    "url": "http://localhost:8081/",
+    "isRepresentativeRun": false,
+    "htmlPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/-2026_05_08_14_23_12-report.html",
+    "jsonPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/-2026_05_08_14_23_12-report.json",
+    "summary": {
+      "performance": 0.55,
+      "accessibility": 0.94,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "http://localhost:8081/",
+    "isRepresentativeRun": false,
+    "htmlPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/-2026_05_08_14_23_42-report.html",
+    "jsonPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/-2026_05_08_14_23_42-report.json",
+    "summary": {
+      "performance": 0.55,
+      "accessibility": 0.94,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "http://localhost:8081/events/necessitatibus-maiores-dolorem-nulla-id-412",
+    "isRepresentativeRun": false,
+    "htmlPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/events_necessitatibus_maiores_dolorem_nulla_id_412-2026_05_08_14_23_57-report.html",
+    "jsonPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/events_necessitatibus_maiores_dolorem_nulla_id_412-2026_05_08_14_23_57-report.json",
+    "summary": {
+      "performance": 0.89,
+      "accessibility": 0.87,
+      "best-practices": 0.96,
+      "seo": 1
+    }
+  },
+  {
+    "url": "http://localhost:8081/events/necessitatibus-maiores-dolorem-nulla-id-412",
+    "isRepresentativeRun": false,
+    "htmlPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/events_necessitatibus_maiores_dolorem_nulla_id_412-2026_05_08_14_24_20-report.html",
+    "jsonPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/events_necessitatibus_maiores_dolorem_nulla_id_412-2026_05_08_14_24_20-report.json",
+    "summary": {
+      "performance": 0.91,
+      "accessibility": 0.87,
+      "best-practices": 0.96,
+      "seo": 1
+    }
+  },
+  {
+    "url": "http://localhost:8081/",
+    "isRepresentativeRun": true,
+    "htmlPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/-2026_05_08_14_23_27-report.html",
+    "jsonPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/-2026_05_08_14_23_27-report.json",
+    "summary": {
+      "performance": 0.55,
+      "accessibility": 0.94,
+      "best-practices": 1,
+      "seo": 1
+    }
+  },
+  {
+    "url": "http://localhost:8081/events/necessitatibus-maiores-dolorem-nulla-id-412",
+    "isRepresentativeRun": true,
+    "htmlPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/events_necessitatibus_maiores_dolorem_nulla_id_412-2026_05_08_14_24_09-report.html",
+    "jsonPath": "/home/ali/Training/perf-training/docs/benchmarks/lighthouse-latest/events_necessitatibus_maiores_dolorem_nulla_id_412-2026_05_08_14_24_09-report.json",
+    "summary": {
+      "performance": 0.91,
+      "accessibility": 0.87,
+      "best-practices": 0.96,
+      "seo": 1
+    }
+  }
+]

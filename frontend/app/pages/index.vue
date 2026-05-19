@@ -14,7 +14,8 @@ const api = useApi()
 // @perf-debt: l'endpoint /events ne paginant plus en starter, le payload
 // contient TOUS les events publiés (1 200 sur le seed réaliste). On ne
 // consomme que les 21 premiers via slice — gaspillage massif côté réseau
-// et parsing JSON. Résolu en branche solution/j2-frontend.
+// et parsing JSON. Résolu en branche solution/j3-laravel (cursorPaginate
+// backend + bloc meta.next_cursor).
 const { data, pending, error } = await useAsyncData<{ data: Event[] }>(
   'home-events',
   () => api<{ data: Event[] }>('/events'),
@@ -24,6 +25,21 @@ const events = computed<Event[]>(() => data.value?.data ?? [])
 const hero = computed<Event | undefined>(() => events.value[0])
 const thisWeek = computed<Event[]>(() => events.value.slice(1, 9))
 const popular = computed<Event[]>(() => events.value.slice(9, 21))
+
+// LCP hero : `fetchpriority="high"` + `loading="eager"` sur <NuxtImg>
+// suffisent pour signaler la priorité au browser. On ne pose **pas** de
+// preload `<link rel="preload" as="image">` :
+//   - sur srcset basé sur des largeurs (`1w, 640w, 1280w, ...`),
+//     @nuxt/image n'écrit pas `imagesrcset` dans le preload (il ne
+//     l'ajoute que pour le density-based srcset, cf. NuxtImg.vue
+//     `hasMultipleDensities`). Le preload se réduit alors à `href`
+//     pointant sur la plus grande variante (2048w, ~169 Ko AVIF), ce
+//     qui sur mobile (412px viewport, srcset choisi 640w ~40 Ko) double
+//     le coût bande passante au lieu de l'économiser.
+//   - `fetchpriority="high"` couvre l'usage 80 % : le browser priorise
+//     le fetch du hero dans la file critical-path après la découverte du
+//     `<img>` au parse HTML, sans risque de mismatch.
+// @perf-fix: hero image fetchpriority="high" — solution/j2-bundle.
 
 const CATEGORIES: EventCategory[] = [
   'concert', 'festival', 'theater', 'conference', 'exhibition',
@@ -35,17 +51,23 @@ const CATEGORIES: EventCategory[] = [
     <!-- ============== Hero ============== -->
     <section v-if="hero" class="relative bg-slate-900 text-white">
       <!--
-        @perf-debt: pas de `fetchpriority="high"`, pas de preload via
-        useHead({ link: [{ rel:'preload', as:'image' }] }). Cette image
-        est la LCP candidate principale (cf. spec §5 écran 1) — résolu
-        en J1 atelier "j1-cdn-cache".
+        @perf-fix: <NuxtImg> + fetchpriority="high" + preload (cf. useHead
+        ci-dessus). LCP candidate principale (spec §5 écran 1) — solution/
+        j2-bundle. AVIF/WebP négocié, sizes responsive, resize côté IPX
+        (1920×600 desktop, 768×320 mobile).
       -->
-      <img
+      <NuxtImg
         v-if="hero.cover_image_url"
-        :src="hero.cover_image_url"
+        :src="useImageSrc(hero.cover_image_url)"
         :alt="hero.title"
+        preset="hero"
+        width="1920"
+        height="600"
+        sizes="100vw sm:100vw md:100vw lg:100vw"
+        fetchpriority="high"
+        loading="eager"
         class="absolute inset-0 h-full w-full object-cover opacity-50"
-      >
+      />
       <div class="relative mx-auto max-w-7xl px-4 py-24">
         <p class="text-sm font-medium uppercase tracking-wide text-brand-100 mb-2">
           {{ categoryLabel(hero.category) }} · à la une

@@ -11,17 +11,22 @@ defineProps<{ event: Event }>()
     class="group block overflow-hidden rounded-lg border border-slate-200 bg-white transition hover:shadow-md"
   >
     <!--
-      @perf-debt: image full-size servie depuis MinIO (1920×1080, ~400 Ko),
-      pas de srcset/sizes, pas de format AVIF/WebP négocié, pas de
-      lazy-loading explicite ici (le navigateur applique sa stratégie par
-      défaut). Résolu en J2 atelier "j2-bundle" via <NuxtImg>.
+      @perf-fix: <NuxtImg> + preset card (AVIF/WebP, resize 480×270,
+      lazy-loading natif). Économie majeure : on passe de 400 Ko/img full-
+      size à ~25-40 Ko AVIF — multiplié par 12-20 cards visibles sur la
+      home, c'est ~5 Mo de moins au-dessus du fold. — solution/j2-bundle.
     -->
-    <img
+    <NuxtImg
       v-if="event.cover_image_url"
-      :src="event.cover_image_url"
+      :src="useImageSrc(event.cover_image_url)"
       :alt="event.title"
+      preset="card"
+      width="480"
+      height="270"
+      sizes="100vw sm:50vw lg:25vw xl:300px"
+      loading="lazy"
       class="aspect-video w-full object-cover transition group-hover:scale-105"
-    >
+    />
     <div class="p-4 space-y-2">
       <p class="text-xs font-medium uppercase tracking-wide text-brand-700">
         {{ categoryLabel(event.category) }}

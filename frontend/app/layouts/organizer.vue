@@ -1,32 +1,9 @@
 <script setup lang="ts">
-// @perf-debt: Chart.js importé statiquement dans le layout — donc inclus dans
-// le bundle initial de TOUTES les pages organisateur, pas juste celles qui
-// affichent un graphe. ~200 Ko de JS chargés inutilement par le navigateur
-// pour /organizer/events ou /organizer/events/[id]/participants.
-// Résolu en J2 atelier "j2-bundle" : remplacement par un
-// `defineAsyncComponent` ciblé dans la page dashboard uniquement.
-import {
-  Chart,
-  LineController,
-  LineElement,
-  PointElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-  Filler,
-} from 'chart.js'
-
-Chart.register(
-  LineController,
-  LineElement,
-  PointElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-  Filler,
-)
+// @perf-fix: Chart.js retiré du layout (était importé statiquement, incluait
+// ~160 Ko raw / ~56 Ko gzipped dans le First Load JS de TOUTES les pages
+// organizer). L'import est désormais isolé dans `~/components/SalesChart.vue`,
+// chargé via `defineAsyncComponent` uniquement par /organizer/dashboard.
+// — solution/j2-bundle.
 </script>
 
 <template>

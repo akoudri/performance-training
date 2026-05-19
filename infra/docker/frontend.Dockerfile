@@ -1,5 +1,10 @@
 # =============================================================================
-# Resonance — image frontend Nuxt 4 (Node 20) — starter prod-like
+# Resonance — image frontend Nuxt 4 (Node 22) — starter prod-like
+# =============================================================================
+# Node 22 LTS : @nuxt/image v2 requiert Node ≥ 22 (engines field). Le bump
+# 20 → 22 a été fait dans solution/j2-bundle pour permettre l'install de
+# @nuxt/image. Aucun impact fonctionnel sur le starter (Nitro fonctionne
+# identiquement sur les deux versions).
 # =============================================================================
 # Phase 4-bis : le starter tourne en mode prod-like. L'image est construite
 # en multi-stage : `builder` lance `npm ci` + `nuxt build` ; `runtime`
@@ -17,7 +22,7 @@
 
 # ---- Stage 1 : builder -----------------------------------------------------
 
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -34,7 +39,7 @@ RUN npm run build
 
 # ---- Stage 2 : runtime -----------------------------------------------------
 
-FROM node:20-alpine AS runtime
+FROM node:22-alpine AS runtime
 
 ENV NODE_ENV=production
 
@@ -46,7 +51,7 @@ RUN apk add --no-cache tini
 
 COPY --from=builder /app/.output ./.output
 
-# Le user `node` (UID 1000) existe par défaut dans node:20-alpine et a accès
+# Le user `node` (UID 1000) existe par défaut dans node:22-alpine et a accès
 # à /app. Pas de bind-mount au runtime — le source du frontend reste hors
 # du container.
 USER node

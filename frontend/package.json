@@ -12,6 +12,8 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
+    "@nuxt/fonts": "^0.14.0",
+    "@nuxt/image": "^2.0.0",
     "@pinia/nuxt": "latest",
     "chart.js": "latest",
     "nuxt": "latest",

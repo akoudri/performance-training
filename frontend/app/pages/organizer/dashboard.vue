@@ -1,7 +1,17 @@
 <script setup lang="ts">
 import type { Event, SingleResponse } from '~/types/event'
-import { Chart } from 'chart.js'
 import { formatPrice } from '~/utils/format'
+
+// @perf-fix: Chart.js code-splitté via `defineAsyncComponent`. SalesChart
+// (~ 160 Ko raw / ~ 56 Ko gzipped quand inliné) n'est tiré que sur le
+// dashboard, et **après** mount client (puisque tout l'espace organizer
+// est sous <ClientOnly> dans le layout). — solution/j2-bundle.
+const SalesChart = defineAsyncComponent({
+  loader: () => import('~/components/SalesChart.vue'),
+  loadingComponent: () => h('div', {
+    class: 'h-64 grid place-items-center text-sm text-slate-400',
+  }, 'Chargement de la courbe…'),
+})
 
 definePageMeta({
   layout: 'organizer',
@@ -82,44 +92,9 @@ onBeforeUnmount(() => {
   if (pollHandle) clearInterval(pollHandle)
 })
 
-// ---- Chart.js : courbe ventes 30j --------------------------------------
-const chartCanvas = ref<HTMLCanvasElement | null>(null)
-let chartInstance: Chart | null = null
-
-function renderChart() {
-  if (!chartCanvas.value) return
-  const points = dashboardState.value.salesChart
-  if (chartInstance) {
-    chartInstance.data.labels = points.map(p => p.day.slice(0, 10))
-    chartInstance.data.datasets[0]!.data = points.map(p => p.revenue_cents / 100)
-    chartInstance.update('none')
-    return
-  }
-  chartInstance = new Chart(chartCanvas.value, {
-    type: 'line',
-    data: {
-      labels: points.map(p => p.day.slice(0, 10)),
-      datasets: [{
-        label: 'Revenus (€)',
-        data: points.map(p => p.revenue_cents / 100),
-        borderColor: '#4655e8',
-        backgroundColor: 'rgba(70, 85, 232, 0.15)',
-        fill: true,
-        tension: 0.25,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: { y: { beginAtZero: true } },
-    },
-  })
-}
-
-watch(() => dashboardState.value.salesChart, () => renderChart(), { immediate: false })
-onMounted(() => renderChart())
-onBeforeUnmount(() => chartInstance?.destroy())
+// La logique Chart.js (init, update, destroy) vit désormais dans
+// `~/components/SalesChart.vue`. Cette page passe juste les `points` ;
+// le composant gère canvas + lifecycle Chart.js.
 </script>
 
 <template>
@@ -171,14 +146,12 @@ onBeforeUnmount(() => chartInstance?.destroy())
       </div>
     </div>
 
-    <!-- Courbe de ventes -->
+    <!-- Courbe de ventes — composant async, voir defineAsyncComponent ci-dessus. -->
     <section class="rounded-lg bg-white p-5 border border-slate-200 mb-8">
       <h2 class="text-lg font-semibold mb-3">
         Ventes — 30 derniers jours
       </h2>
-      <div class="h-64">
-        <canvas ref="chartCanvas" />
-      </div>
+      <SalesChart :points="dashboardState.salesChart" />
     </section>
 
     <!-- Table d'événements -->

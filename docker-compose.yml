@@ -211,7 +211,7 @@ services:
   # runtime). Profil "tools" : ne démarre pas avec `docker compose up`.
   # Usage : `make frontend-lint` / `make frontend-typecheck`.
   frontend-tools:
-    image: node:20-alpine
+    image: node:22-alpine
     container_name: resonance-frontend-tools
     working_dir: /app
     user: "${UID:-1000}:${GID:-1000}"

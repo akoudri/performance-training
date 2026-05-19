@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import type { Event, EventSession, SingleResponse } from '~/types/event'
-import { categoryLabel, formatDateTime, formatPrice } from '~/utils/format'
+import { categoryLabel, formatDateTime } from '~/utils/format'
 
 definePageMeta({ layout: 'default' })
 
 const route = useRoute()
-const router = useRouter()
 const api = useApi()
-const auth = useAuthStore()
 
 const slug = computed(() => route.params.slug as string)
 
@@ -23,61 +21,14 @@ const { data: sessionsData } = await useAsyncData<{ data: EventSession[] }>(
 )
 const sessions = computed<EventSession[]>(() => sessionsData.value?.data ?? [])
 
+// LCP hero : on s'appuie uniquement sur `fetchpriority="high"` côté
+// <NuxtImg>. Cf. note dans pages/index.vue pour pourquoi on n'écrit
+// pas de `<link rel="preload" as="image">` manuel ni via la prop
+// `preload` de NuxtImg (mismatch préload/srcset coûteux sur mobile).
+// @perf-fix: hero image fetchpriority="high" — solution/j2-bundle.
 useHead(() => ({
   title: event.value ? `${event.value.title} · Resonance` : 'Événement · Resonance',
 }))
-
-// Carte de billetterie : sélecteur session + map quantités par catégorie.
-const selectedSessionId = ref<number | null>(null)
-const quantities = ref<Record<number, number>>({})
-
-const selectedSession = computed<EventSession | null>(() => {
-  return sessions.value.find(s => s.id === selectedSessionId.value) ?? null
-})
-
-watch(sessions, (s) => {
-  if (s.length && selectedSessionId.value === null) {
-    selectedSessionId.value = s[0]!.id
-  }
-}, { immediate: true })
-
-const totalCents = computed(() => {
-  if (!selectedSession.value) return 0
-  let total = 0
-  for (const cat of selectedSession.value.ticket_categories) {
-    total += (quantities.value[cat.id] ?? 0) * cat.price_cents
-  }
-  return total
-})
-
-const totalQty = computed(() => {
-  let total = 0
-  for (const v of Object.values(quantities.value)) total += v
-  return total
-})
-
-function adjust(catId: number, delta: number, max: number) {
-  const next = Math.max(0, Math.min(max, (quantities.value[catId] ?? 0) + delta))
-  quantities.value = { ...quantities.value, [catId]: next }
-}
-
-function goToCheckout() {
-  if (!auth.isAuthenticated) {
-    router.push({ path: '/login', query: { redirect: route.fullPath } })
-    return
-  }
-  const items = Object.entries(quantities.value)
-    .filter(([, qty]) => qty > 0)
-    .map(([id, qty]) => `${id}:${qty}`)
-    .join(',')
-  router.push({
-    path: '/checkout',
-    query: {
-      session_id: String(selectedSessionId.value),
-      items,
-    },
-  })
-}
 </script>
 
 <template>
@@ -88,16 +39,22 @@ function goToCheckout() {
   <div v-else-if="event" class="bg-white">
     <!-- Hero pleine largeur (LCP) -->
     <!--
-      @perf-debt: pas de fetchpriority="high", pas de preload, pas de
-      <NuxtImg> (formats AVIF/WebP, srcset). Image native 1920×1080, ~400 Ko
-      qui ralentit dramatiquement la LCP. Résolu en J1/J2.
+      @perf-fix: <NuxtImg> + fetchpriority="high" + preload (cf. useHead).
+      LCP candidate (spec §5 écran 3) — solution/j2-bundle. AVIF/WebP,
+      sizes responsive, resize 1600×420 côté IPX.
     -->
-    <img
+    <NuxtImg
       v-if="event.cover_image_url"
-      :src="event.cover_image_url"
+      :src="useImageSrc(event.cover_image_url)"
       :alt="event.title"
+      preset="hero"
+      width="1600"
+      height="420"
+      sizes="100vw sm:100vw md:100vw lg:1280px"
+      fetchpriority="high"
+      loading="eager"
       class="w-full h-[420px] object-cover"
-    >
+    />
 
     <div class="mx-auto max-w-7xl px-4 py-10 grid gap-10 lg:grid-cols-[1fr_380px]">
       <!-- Colonne gauche -->
@@ -126,14 +83,26 @@ function goToCheckout() {
           <h2 class="text-xl font-semibold mb-3">
             Galerie
           </h2>
+          <!--
+            @perf-fix: galerie en <NuxtImg> + lazy loading natif. Les
+            vignettes sont below-fold, donc lazy par défaut ; AVIF/WebP
+            négocié + resize 480×270 (ratio 16:9 du grid). Économise
+            beaucoup sur les fiches qui ont 6-8 médias en pool.
+            — solution/j2-bundle.
+          -->
           <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            <img
+            <NuxtImg
               v-for="m in event.media"
               :key="m.id"
-              :src="m.url"
+              :src="useImageSrc(m.url)"
               :alt="m.alt_text ?? ''"
+              preset="gallery"
+              width="480"
+              height="270"
+              sizes="50vw sm:33vw md:33vw lg:300px"
+              loading="lazy"
               class="aspect-video w-full object-cover rounded"
-            >
+            />
           </div>
         </section>
 
@@ -158,76 +127,18 @@ function goToCheckout() {
       </div>
 
       <!--
-        Carte de billetterie sticky (sélecteur session + catégories + total).
-        @perf-debt: pas de lazy hydration / <ClientOnly>. La carte hydrate
-        avec le reste de la page → plus de JS bloquant pour le LCP. Résolu
-        en J2 atelier "j2-bundle" (lazy hydration manuelle).
+        @perf-fix: TicketSelector extrait + lazy hydration via la convention
+        Nuxt 4 `<LazyXxx hydrate-on-idle>`. SSR rend l'aside complet (pas
+        de mismatch d'hydratation, l'utilisateur voit le sélecteur tout de
+        suite) ; la mise en place des event handlers et watchers attend
+        que le browser soit idle, ce qui débloque le LCP du hero pendant
+        que les ressources critical-path s'hydratent. — solution/j2-bundle.
       -->
-      <aside class="lg:sticky lg:top-6 self-start rounded-lg border border-slate-200 bg-slate-50 p-5 space-y-4">
-        <h2 class="text-lg font-semibold">
-          Réserver vos billets
-        </h2>
-
-        <div>
-          <label class="text-sm font-medium text-slate-700 block mb-1">Session</label>
-          <select
-            v-model.number="selectedSessionId"
-            class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-          >
-            <option v-for="s in sessions" :key="s.id" :value="s.id">
-              {{ formatDateTime(s.starts_at) }}
-            </option>
-          </select>
-        </div>
-
-        <div v-if="selectedSession" class="space-y-2">
-          <div
-            v-for="cat in selectedSession.ticket_categories"
-            :key="cat.id"
-            class="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white p-3"
-          >
-            <div>
-              <p class="text-sm font-medium">
-                {{ cat.name }}
-              </p>
-              <p class="text-xs text-slate-500">
-                {{ formatPrice(cat.price_cents) }} · {{ cat.remaining }} restants
-              </p>
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="rounded border border-slate-300 px-2 leading-none"
-                @click="adjust(cat.id, -1, cat.remaining)"
-              >
-                −
-              </button>
-              <span class="w-6 text-center text-sm">{{ quantities[cat.id] ?? 0 }}</span>
-              <button
-                type="button"
-                class="rounded border border-slate-300 px-2 leading-none"
-                @click="adjust(cat.id, 1, cat.remaining)"
-              >
-                +
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
-          <span class="text-slate-500">Total ({{ totalQty }} billet<span v-if="totalQty > 1">s</span>)</span>
-          <span class="font-semibold">{{ formatPrice(totalCents) }}</span>
-        </div>
-
-        <button
-          type="button"
-          :disabled="totalQty === 0"
-          class="w-full rounded-md bg-brand-600 px-4 py-2 text-white font-medium hover:bg-brand-700 disabled:opacity-50"
-          @click="goToCheckout"
-        >
-          Acheter
-        </button>
-      </aside>
+      <LazyTicketSelector
+        hydrate-on-idle
+        :event="event"
+        :sessions="sessions"
+      />
     </div>
   </div>
 </template>

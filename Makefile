@@ -50,7 +50,7 @@ env: ## Crée .env depuis .env.example si absent
 # ----- Cycle de vie de la stack ----------------------------------------------
 
 .PHONY: up
-up: env ensure-images ## Démarre toute la stack en arrière-plan
+up: env ensure-images ensure-backend-deps ## Démarre toute la stack en arrière-plan
 	$(COMPOSE) up -d
 	@echo ""
 	@echo "Stack démarrée. Services :"
@@ -74,6 +74,33 @@ ensure-images:
 	@if ! docker image inspect resonance/frontend:starter >/dev/null 2>&1; then \
 		echo "→ Image resonance/frontend:starter absente, build initial (1-2 min)..."; \
 		$(COMPOSE) build frontend; \
+	fi
+
+# Installe les artefacts backend gitignorés absents d'un clone frais :
+#   - backend/.env (sans lui, Laravel boot avec une config par défaut
+#     incohérente avec la stack Docker → erreurs DB/queue/cache).
+#   - backend/vendor (sans lui, toute commande artisan tombe sur
+#     "Failed opening required '/app/vendor/autoload.php'"). Le bind-mount
+#     ./backend:/app masque tout vendor pré-installé dans l'image, donc
+#     composer install doit tourner dans un container monté.
+#   - APP_KEY dans backend/.env (sans lui, Laravel jette "No application
+#     encryption key has been specified.").
+# `run --rm --no-deps` : container éphémère, ne démarre pas postgres/redis
+# pour ce setup (composer + key:generate sont autosuffisants). Idempotent :
+# chaque bloc est conditionnel et silencieux si l'artefact est déjà là.
+.PHONY: ensure-backend-deps
+ensure-backend-deps:
+	@if [ ! -f backend/.env ]; then \
+		echo "→ backend/.env absent, copie depuis backend/.env.example..."; \
+		cp backend/.env.example backend/.env; \
+	fi
+	@if [ ! -f backend/vendor/autoload.php ]; then \
+		echo "→ backend/vendor absent, composer install (1-2 min)..."; \
+		$(COMPOSE) run --rm --no-deps -u app backend composer install --no-interaction --prefer-dist --no-progress; \
+	fi
+	@if ! grep -qE "^APP_KEY=base64:" backend/.env; then \
+		echo "→ APP_KEY absent dans backend/.env, génération..."; \
+		$(COMPOSE) run --rm --no-deps -u app backend php artisan key:generate --force; \
 	fi
 
 .PHONY: down

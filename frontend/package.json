@@ -12,7 +12,6 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
-    "@nuxt/image": "^2.0.0",
     "@pinia/nuxt": "latest",
     "chart.js": "latest",
     "nuxt": "latest",

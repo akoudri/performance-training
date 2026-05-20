@@ -226,7 +226,12 @@ restore: ## Restore depuis infra/seeds-dump/realistic.sql.gz + pool MinIO (cible
 	# mesures Lighthouse silencieusement faussées (LCP image perdu, total
 	# byte weight sous-évalué). Idempotent : ~30 HEAD requests s'il n'y a
 	# rien à restaurer (~ 100 ms).
-	$(COMPOSE) exec -u app backend php artisan resonance:ensure-media-pool --quiet-when-complete
+	# TODO: commande artisan `resonance:ensure-media-pool` pas encore implémentée
+	# (référencée dans docs/architecture.md et docs/benchmarks/README.md). Ligne
+	# désactivée pour débloquer `make lighthouse` / `make k6` ; tant qu'elle est
+	# off, peupler MinIO manuellement (mc cp infra/seeds-dump/media/* …) sinon
+	# les mesures Lighthouse seront faussées par les 404 sur /media/*.
+	# $(COMPOSE) exec -u app backend php artisan resonance:ensure-media-pool --quiet-when-complete
 
 # ----- Frontend (Nuxt) -------------------------------------------------------
 # Phase 4-bis : le service `frontend` est en mode prod-like (image multi-stage

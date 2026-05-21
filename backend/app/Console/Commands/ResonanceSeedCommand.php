@@ -9,6 +9,7 @@ use Database\Seeders\RealisticDatasetSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Commande dédiée pour seeder le dataset light ou realistic, avec option
@@ -33,9 +34,18 @@ class ResonanceSeedCommand extends Command
             return Command::INVALID;
         }
 
+        // @perf-fix: bascule la connexion par défaut sur pgsql_direct pour
+        // toute la durée du seed. Indispensable depuis solution/j3-postgres :
+        // PgBouncer en transaction pooling ne survit pas aux INSERT batch
+        // multi-transactions du RealisticDatasetSeeder (200 k tickets).
+        DB::setDefaultConnection('pgsql_direct');
+
         if ($this->option('fresh')) {
             $this->info('migrate:fresh…');
-            Artisan::call('migrate:fresh', ['--force' => true], $this->output);
+            Artisan::call('migrate:fresh', [
+                '--force' => true,
+                '--database' => 'pgsql_direct',
+            ], $this->output);
         }
 
         // Désactive globalement les events Eloquent durant le seed.

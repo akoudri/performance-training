@@ -24,7 +24,11 @@ class ResonanceDumpDatabaseCommand extends Command
     public function handle(): int
     {
         $output = (string) $this->option('output');
-        $config = config('database.connections.'.config('database.default'));
+        // @perf-fix: lecture explicite sur pgsql_direct (bypass PgBouncer)
+        // pour éviter les soucis de transaction pooling sur une opération
+        // longue (pg_dump tient une connexion persistante avec snapshot
+        // transactionnel — incompatible avec pool_mode=transaction).
+        $config = config('database.connections.pgsql_direct');
 
         $host = (string) ($config['host'] ?? 'postgres');
         $port = (string) ($config['port'] ?? '5432');
@@ -39,8 +43,13 @@ class ResonanceDumpDatabaseCommand extends Command
 
         $start = microtime(true);
 
+        // --schema=public : on filtre le schéma applicatif uniquement.
+        // Le schéma "pgbouncer" (auth_query setup, cf. infra/postgres/init/)
+        // est cluster-level et reste hors du dump — sinon le restore (qui
+        // drop et recrée public) tenterait d'écraser une fonction owned by
+        // postgres, ce qui échouerait pour un user non superuser.
         $cmd = sprintf(
-            'pg_dump -h %s -p %s -U %s -d %s --format=plain --no-owner --no-privileges --clean --if-exists | gzip -c > %s',
+            'pg_dump -h %s -p %s -U %s -d %s --schema=public --format=plain --no-owner --no-privileges --clean --if-exists | gzip -c > %s',
             escapeshellarg($host),
             escapeshellarg($port),
             escapeshellarg($username),

@@ -84,11 +84,45 @@ return [
             ]) : [],
         ],
 
+        // Path applicatif : Laravel runtime (HTTP, queue workers, cache).
+        // Pointe sur PgBouncer en transaction pooling (cf. compose).
+        // PDO::ATTR_EMULATE_PREPARES forcé à true : indispensable en
+        // transaction mode pour éviter les prepared statements liés à
+        // une session backend (qui ne survit pas entre deux transactions
+        // côté pgbouncer).
         'pgsql' => [
             'driver' => 'pgsql',
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
             'port' => env('DB_PORT', '5432'),
+            'database' => env('DB_DATABASE', 'laravel'),
+            'username' => env('DB_USERNAME', 'root'),
+            'password' => env('DB_PASSWORD', ''),
+            'charset' => env('DB_CHARSET', 'utf8'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => env('DB_SSLMODE', 'prefer'),
+            'options' => extension_loaded('pdo_pgsql') ? [
+                PDO::ATTR_EMULATE_PREPARES => true,
+            ] : [],
+        ],
+
+        // Path admin : connexion DIRECTE à Postgres (bypass PgBouncer).
+        // Utilisé par migrations, seeders, dump SQL et restore. Le mode
+        // transaction de PgBouncer interdirait les DDL longues, les
+        // sessions persistantes (`SET search_path`) et les prepared
+        // statements multi-transactions dont Laravel se sert au seed.
+        //
+        // Usage explicite :
+        //   php artisan migrate --database=pgsql_direct
+        //   php artisan db:seed --database=pgsql_direct
+        //   ResonanceDumpDatabaseCommand / ResonanceRestoreDatabaseCommand
+        'pgsql_direct' => [
+            'driver' => 'pgsql',
+            'url' => env('DB_URL'),
+            'host' => env('DB_HOST_DIRECT', 'postgres'),
+            'port' => env('DB_PORT_DIRECT', '5432'),
             'database' => env('DB_DATABASE', 'laravel'),
             'username' => env('DB_USERNAME', 'root'),
             'password' => env('DB_PASSWORD', ''),

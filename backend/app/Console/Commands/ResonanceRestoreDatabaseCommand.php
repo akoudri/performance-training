@@ -32,7 +32,11 @@ class ResonanceRestoreDatabaseCommand extends Command
             return Command::FAILURE;
         }
 
-        $config = config('database.connections.'.config('database.default'));
+        // @perf-fix: lecture explicite sur pgsql_direct (bypass PgBouncer)
+        // pour exécuter DROP SCHEMA public CASCADE + import psql sans
+        // entrer dans le mode transaction pooling (incompatible avec
+        // les sessions longues que requiert un import multi-statements).
+        $config = config('database.connections.pgsql_direct');
         $host = (string) ($config['host'] ?? 'postgres');
         $port = (string) ($config['port'] ?? '5432');
         $database = (string) ($config['database'] ?? 'resonance');
@@ -44,12 +48,18 @@ class ResonanceRestoreDatabaseCommand extends Command
 
         $start = microtime(true);
 
-        // Reset du schéma via la connexion Eloquent (plus rapide que de
-        // dropper/recréer la base, et évite le souci de connexion en cours).
+        // Reset du schéma via la connexion Eloquent directe (bypass
+        // PgBouncer — les DDL CASCADE prennent un ACCESS EXCLUSIVE, qu'on
+        // veut éviter de faire transiter par un pooler en transaction).
         $this->line('  • drop & recreate schema public…');
-        DB::unprepared('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO '.$username.'; GRANT ALL ON SCHEMA public TO public;');
+        DB::connection('pgsql_direct')->unprepared(
+            'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public; '
+            .'GRANT ALL ON SCHEMA public TO '.$username.'; '
+            .'GRANT ALL ON SCHEMA public TO public;'
+        );
 
         // Force la déconnexion : la session courante a perdu ses search_path.
+        DB::connection('pgsql_direct')->disconnect();
         DB::disconnect();
 
         $this->line('  • gunzip -c | psql…');

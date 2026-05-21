@@ -13,19 +13,73 @@ services:
     image: postgres:16-alpine
     container_name: resonance-postgres
     restart: unless-stopped
+    # @perf-fix: postgresql.conf production-tuned (solution/j3-postgres) —
+    # remplace les defaults stricts de l'image alpine (shared_buffers=128MB).
+    # Cf. infra/postgres/postgresql.conf pour les valeurs et leur rationale.
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Lu UNIQUEMENT par infra/postgres/init/01-pgbouncer-auth.sh au
+      # premier initdb. Une fois le rôle pgbouncer créé en base, cette
+      # valeur n'est plus consultée côté Postgres (seul PgBouncer la lit).
+      PGBOUNCER_PASSWORD: ${PGBOUNCER_PASSWORD}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # Init scripts exécutés UNE FOIS lors du premier initdb (volume
+      # postgres_data vide). Ré-exécution = `docker compose down -v`.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - resonance
+
+  # @perf-fix: PgBouncer transaction-mode pooler (solution/j3-postgres).
+  # Frontal Postgres pour Laravel : permet à un faible nombre de backends
+  # PG (default_pool_size=25) de servir un grand nombre de clients FPM
+  # (max_client_conn=100), sans surcharger Postgres. Auth via SCRAM
+  # passthrough (cf. infra/postgres/init/01-pgbouncer-auth.sh).
+  #
+  # Path applicatif : Laravel `pgsql` connection → pgbouncer:6432.
+  # Path admin : Laravel `pgsql_direct` connection → postgres:5432
+  # (migrations, seeders, dump, restore — incompatibles avec transaction
+  # pooling à cause des prepared statements / sessions persistantes).
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: resonance-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: resonance
+      # L'entrypoint edoburu génère /etc/pgbouncer/userlist.txt à partir
+      # de DB_USER + DB_PASSWORD au démarrage. Aucun hash committé.
+      DB_USER: pgbouncer
+      DB_PASSWORD: ${PGBOUNCER_PASSWORD}
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:6432"
+    volumes:
+      # Config explicite (override du template par défaut de l'image).
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U pgbouncer || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - resonance
 
@@ -140,6 +194,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      pgbouncer:
+        condition: service_started
       redis:
         condition: service_healthy
       minio:

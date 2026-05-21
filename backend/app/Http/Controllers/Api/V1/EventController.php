@@ -35,11 +35,16 @@ class EventController extends Controller
             ->where('status', Event::STATUS_PUBLISHED);
 
         if ($q = $request->string('q')->toString()) {
-            // @perf-debt: ILIKE sans index FTS — résolu J3 (gin tsvector FR).
-            $query->where(function ($w) use ($q) {
-                $w->where('title', 'ILIKE', "%{$q}%")
-                    ->orWhere('description', 'ILIKE', "%{$q}%");
-            });
+            // @perf-fix: full-text français via to_tsvector @@ plainto_tsquery.
+            // S'appuie sur l'index GIN idx_events_search (cf. migration
+            // 2026_05_07_140100_add_performance_indexes) qui indexe la même
+            // expression `to_tsvector('french', title || ' ' || description)` —
+            // condition impérative pour que le planner choisisse l'index.
+            // Résout le @perf-debt starter "ILIKE sans index FTS".
+            $query->whereRaw(
+                "to_tsvector('french', title || ' ' || description) @@ plainto_tsquery('french', ?)",
+                [$q],
+            );
         }
         if ($city = $request->string('city')->toString()) {
             $query->where('city', $city);

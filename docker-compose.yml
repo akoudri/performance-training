@@ -112,11 +112,11 @@ services:
     networks:
       - resonance
 
-  # Backend Laravel — PHP 8.3 + FPM (Phase 4-bis : starter prod-like).
-  # FPM écoute sur :9000 en interne (réseau Docker uniquement). Nginx fait
-  # fastcgi_pass vers backend:9000 pour le préfixe /api/* (cf. service nginx).
-  # Aucun port HTTP exposé sur l'host : tout passe par Nginx :8080.
-  # @perf-debt: opcache désactivé / pas d'Octane — résolus en J3.
+  # Backend Laravel — PHP 8.3 + Octane + FrankenPHP (j3-laravel).
+  # FrankenPHP est le serveur web du backend ; il écoute en HTTP sur :8000.
+  # Nginx fait `proxy_pass http://backend:8000` au lieu de `fastcgi_pass`.
+  # OPcache + JIT tracing 64M activés (cf. backend.Dockerfile).
+  # `php artisan optimize` chaîné au CMD : config/route/view/event:cache.
   backend:
     build:
       context: ./infra/docker
@@ -133,10 +133,10 @@ services:
       # Cache local des médias placeholders téléchargés une fois depuis
       # picsum.photos puis uploadés dans MinIO (cf. resonance-spec.md §7).
       - ./infra/seeds-dump:/seeds-dump
-    # Pas de mapping host:9000 (FastCGI ≠ HTTP, inutile en direct ; conservé
-    # uniquement sur le réseau Compose pour Nginx).
+    # FrankenPHP écoute sur :8000 (HTTP). Pas de mapping host par défaut —
+    # tout passe par Nginx :${NGINX_PORT}.
     expose:
-      - "9000"
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,7 +151,32 @@ services:
       APP_DEBUG: "true"
     networks:
       - resonance
-    # CMD = `php-fpm -F` (cf. infra/docker/backend.Dockerfile).
+    # CMD = `php artisan octane:start --server=frankenphp` (cf. backend.Dockerfile).
+
+  # Worker Horizon — consomme les jobs des queues Redis (db 0).
+  # Même image que `backend` mais commande différente : `php artisan horizon`
+  # qui supervise les workers selon `config/horizon.php`. Le dashboard
+  # /horizon est servi par le service `backend` (FastCGI), pas ici.
+  horizon:
+    image: resonance/backend:dev
+    container_name: resonance-horizon
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./infra/seeds-dump:/seeds-dump
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+    command: ["php", "artisan", "horizon"]
+    user: "${UID:-1000}:${GID:-1000}"
+    networks:
+      - resonance
 
   # Frontend Nuxt 4 (Node 20) — starter prod-like (Phase 4-bis).
   # Image multi-stage (builder + runtime) : le source est embarqué et le
@@ -184,8 +209,9 @@ services:
       - resonance
 
   # Frontal HTTP unique de la stack starter (Phase 4-bis).
-  # - /api/*   → fastcgi_pass backend:9000 (PHP-FPM).
-  # - le reste → proxy_pass http://frontend:3000 (Nuxt SSR Node preview).
+  # - /api/*    → proxy_pass http://backend:8000 (Octane FrankenPHP).
+  # - /horizon  → idem (Laravel route servie par Octane).
+  # - le reste  → proxy_pass http://frontend:3000 (Nuxt SSR Node preview).
   # Image fholzer/nginx-brotli : modules brotli compilés MAIS NON ACTIVÉS
   # (cf. config). Volontairement non tunée — gzip/brotli/HTTP2/Cache-Control
   # absents, à introduire dans solution/j1-cdn-cache.

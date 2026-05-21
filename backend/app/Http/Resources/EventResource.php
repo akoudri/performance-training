@@ -9,10 +9,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * @perf-debt: relations `organizer` et `media` lues sans whenLoaded() —
- *             chaque event listé déclenche 2 SELECT supplémentaires
- *             (organizer + media). Résolu en J3 par switch vers
- *             whenLoaded() + with(['organizer', 'media']) côté caller.
+ * @perf-fix: relations `organizer`, `media` et `sessions` ne sont
+ *            sérialisées que si elles ont été eager-loadées (whenLoaded).
+ *            Le caller contrôle la profondeur via `with([...])`.
  */
 class EventResource extends JsonResource
 {
@@ -34,10 +33,9 @@ class EventResource extends JsonResource
                 : null,
             'published_at' => $this->published_at?->toIso8601String(),
             'status' => $this->status,
-            // @perf-debt: N+1 — chaque event listé déclenche 1 SELECT
-            // organizer + 1 SELECT media (puis N requêtes par media row).
-            'organizer' => new OrganizerResource($this->organizer),
-            'media' => MediaResource::collection($this->media),
+            'organizer' => new OrganizerResource($this->whenLoaded('organizer')),
+            'media' => MediaResource::collection($this->whenLoaded('media')),
+            'sessions' => EventSessionResource::collection($this->whenLoaded('sessions')),
         ];
     }
 }

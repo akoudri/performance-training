@@ -8,8 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @perf-debt: relation `tickets` lue sans whenLoaded() → 1 SELECT, puis
- *             la cascade N+1 dans TicketResource.
+ * @perf-fix: `tickets` n'est sérialisée que si eager-loadée. Caller doit
+ *            poser `->load(['tickets.ticketCategory', 'tickets.eventSession.event'])`.
  */
 class OrderResource extends JsonResource
 {
@@ -23,7 +23,7 @@ class OrderResource extends JsonResource
             'paid_at' => $this->paid_at?->toIso8601String(),
             'payment_reference' => $this->payment_reference,
             'created_at' => $this->created_at?->toIso8601String(),
-            'tickets' => TicketResource::collection($this->tickets),
+            'tickets' => TicketResource::collection($this->whenLoaded('tickets')),
         ];
     }
 }

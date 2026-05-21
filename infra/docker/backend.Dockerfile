@@ -1,114 +1,108 @@
 # =============================================================================
-# Resonance — image backend Laravel (PHP 8.3 + FPM)
+# Resonance — image backend Laravel (PHP 8.3 + Octane + FrankenPHP)
 # =============================================================================
-# Phase 4-bis : le starter tourne en mode prod-like. Le container expose
-# php-fpm sur :9000 (FastCGI), Nginx en frontal (cf. infra/nginx/) prend le
-# trafic HTTP sur :8080 et fait fastcgi_pass vers ce service.
+# Bascule j3-laravel : on remplace PHP-FPM (Phase 4-bis) par
+# **Laravel Octane + FrankenPHP**. Le serveur web est désormais
+# FrankenPHP (Caddy + module PHP intégré) qui sert directement HTTP sur
+# :8000 — Nginx fait `proxy_pass http://backend:8000` au lieu de
+# `fastcgi_pass backend:9000`.
 #
-# Le master FPM tourne en root (default image), les workers en `app` (UID/GID
-# alignés sur l'host via build args). Pour les commandes admin (composer,
-# artisan), passer `docker compose exec -u app backend …` — le Makefile
-# applique cela par défaut.
-#
-# OPcache est volontairement DÉSACTIVÉ (starter non optimisé).
-# @perf-debt: opcache désactivé — résolu en J3 atelier "laravel-octane".
-# @perf-debt: pm dynamic non tuné (max_children = 20) — pas l'objet de J1.
+# Choix de base : `dunglas/frankenphp:latest-php8.3`
+#   - Image officielle FrankenPHP, alignée avec la doc Laravel Octane.
+#   - Debian 12 slim sous le capot ; PHP 8.3 + frankenphp binaire déjà
+#     en place dans /usr/local/bin/frankenphp.
+#   - On y ajoute les extensions Laravel (pdo_pgsql, redis, intl, gd,
+#     zip, pcntl, bcmath, gmp pour FrankenPHP).
 # =============================================================================
 
-FROM php:8.3-fpm-alpine AS base
+FROM dunglas/frankenphp:latest-php8.3 AS base
 
 # ---- Dépendances système et extensions PHP ---------------------------------
+# install-php-extensions : helper officiel mlocati embarqué dans l'image
+# dunglas/frankenphp pour installer rapidement les extensions PHP.
+#
+# Note : la version frankenphp embarquée dans l'image (1.1.5) est jugée
+# incompatible par Laravel Octane (`WARN Your FrankenPHP binary version
+# may be incompatible with Octane.`). Au premier démarrage, Octane
+# télécharge automatiquement une version compatible dans /app/frankenphp
+# (~ 50 Mo, ~ 5 s, persistant via le bind-mount). Les démarrages
+# suivants sont instantanés.
 
 RUN set -eux; \
-    apk add --no-cache \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
         bash \
         git \
         curl \
         unzip \
         gzip \
-        icu-dev \
-        postgresql-dev \
-        postgresql16-client \
+        postgresql-client \
         libzip-dev \
         libpng-dev \
-        libjpeg-turbo-dev \
-        freetype-dev \
-        oniguruma-dev; \
-    apk add --no-cache --virtual .build-deps \
-        autoconf \
-        g++ \
-        make \
-        linux-headers; \
-    docker-php-ext-configure gd --with-freetype --with-jpeg; \
-    docker-php-ext-install -j"$(nproc)" \
+        libjpeg-dev \
+        libfreetype-dev \
+        libicu-dev \
+        libpq-dev \
+        libonig-dev; \
+    install-php-extensions \
         pdo_pgsql \
-        bcmath \
+        redis \
         intl \
-        zip \
         gd \
-        pcntl; \
-    pecl install redis; \
-    docker-php-ext-enable redis; \
-    apk del .build-deps; \
-    rm -rf /tmp/* /var/cache/apk/*
+        zip \
+        pcntl \
+        bcmath \
+        opcache; \
+    rm -rf /var/lib/apt/lists/*
 
 # ---- Composer --------------------------------------------------------------
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-# ---- Configuration PHP starter ---------------------------------------------
-# OPcache laissé non-configuré (donc désactivé par défaut, contrat starter).
+# ---- Configuration PHP — Octane prod-like ----------------------------------
+# @perf-fix: OPcache activé + JIT tracing 64 Mo. Sous Octane le worker vit
+# longtemps : OPcache stocke le bytecode compilé dans la mémoire partagée
+# du process, JIT compile les hot paths en code natif au fil de l'exécution.
+# `validate_timestamps=1` garde le mode dev confortable (modifs source
+# détectées toutes les 2 s) — en prod on poserait =0 + déploiement
+# atomique avec `opcache_reset()`.
 
 RUN { \
         echo "memory_limit=512M"; \
         echo "post_max_size=64M"; \
         echo "upload_max_filesize=64M"; \
         echo "max_execution_time=600"; \
+        echo ""; \
+        echo "; OPcache + JIT (j3-laravel @perf-fix)"; \
+        echo "opcache.enable=1"; \
+        echo "opcache.enable_cli=1"; \
+        echo "opcache.memory_consumption=256"; \
+        echo "opcache.interned_strings_buffer=16"; \
+        echo "opcache.max_accelerated_files=20000"; \
+        echo "opcache.validate_timestamps=1"; \
+        echo "opcache.revalidate_freq=2"; \
+        echo "opcache.jit=tracing"; \
+        echo "opcache.jit_buffer_size=64M"; \
     } > /usr/local/etc/php/conf.d/zz-resonance.ini
-
-# ---- Configuration FPM (Phase 4-bis : prod-like) ---------------------------
-# - listen 0.0.0.0:9000 : Nginx en réseau Docker doit pouvoir joindre.
-# - user/group = app : worker pool tourne sous l'utilisateur non-root aligné
-#   host (les fichiers que Laravel écrit dans storage/ et bootstrap/cache/
-#   conservent ainsi le bon owner).
-# - clear_env = no : laisse passer les env Compose (DB_*, REDIS_*, etc.).
-# Master FPM en root (default image) → drop privileges vers `app` pour les
-# workers via la directive user/group.
-
-RUN { \
-        echo "[www]"; \
-        echo "user = app"; \
-        echo "group = app"; \
-        echo "listen = 0.0.0.0:9000"; \
-        echo "listen.owner = app"; \
-        echo "listen.group = app"; \
-        echo "pm = dynamic"; \
-        echo "pm.max_children = 20"; \
-        echo "pm.start_servers = 4"; \
-        echo "pm.min_spare_servers = 2"; \
-        echo "pm.max_spare_servers = 8"; \
-        echo "clear_env = no"; \
-        echo "catch_workers_output = yes"; \
-        echo "decorate_workers_output = no"; \
-    } > /usr/local/etc/php-fpm.d/zz-resonance.conf
 
 # ---- Utilisateur non-root aligné sur l'UID host ----------------------------
 
 ARG UID=1000
 ARG GID=1000
 
-# Labels exposant les UID/GID bakés. Le Makefile s'en sert pour détecter
-# qu'une image cache locale a été buildée pour un autre UID que celui du
-# host courant (e.g. clone partagé entre dev Linux UID=1000 et dev Mac
-# UID=501) et déclencher un rebuild automatique. Sans ces labels, FPM
-# tournerait en UID bakée et échouerait à écrire dans le bind-mount
-# `./backend` (storage/, bootstrap/cache/) avec "Permission denied".
-LABEL resonance.host.uid="${UID}"
-LABEL resonance.host.gid="${GID}"
-
 RUN set -eux; \
-    addgroup -g "${GID}" -S app; \
-    adduser -u "${UID}" -G app -s /bin/bash -D app; \
+    if getent group "${GID}" >/dev/null; then \
+        existing_group=$(getent group "${GID}" | cut -d: -f1); \
+        groupmod -n app "${existing_group}"; \
+    else \
+        groupadd -g "${GID}" app; \
+    fi; \
+    if id -u "${UID}" >/dev/null 2>&1; then \
+        existing_user=$(getent passwd "${UID}" | cut -d: -f1); \
+        usermod -l app -g app -d /home/app -m "${existing_user}"; \
+    else \
+        useradd -m -u "${UID}" -g app -s /bin/bash app; \
+    fi; \
     mkdir -p /app /home/app/.composer; \
     chown -R app:app /app /home/app
 
@@ -117,12 +111,25 @@ ENV COMPOSER_ALLOW_SUPERUSER=0
 
 WORKDIR /app
 
-# Pas de `USER app` ici : le master FPM doit démarrer en root pour pouvoir
-# basculer les workers en `app`. Pour les `docker compose exec`, passer
-# `-u app` (le Makefile s'en charge).
+# FrankenPHP en mode "non-root" via la variable de l'image officielle.
+# Cf. https://frankenphp.dev/docs/production/#docker
+ENV SERVER_NAME=":8000"
 
-EXPOSE 9000
+EXPOSE 8000
 
-# CMD par défaut de l'image php:8.3-fpm-alpine = ["php-fpm"] (foreground).
-# On l'expose explicitement pour la lisibilité.
-CMD ["php-fpm", "-F"]
+# CMD = optimize + octane:start. `php artisan optimize` chaîne
+# config:cache, route:cache, view:cache, event:cache — tous idempotents,
+# stockés dans bootstrap/cache/ (bind-mount, persistant entre restarts).
+# Cette pré-compilation libère le worker Octane des coûts de bootstrap
+# au cold start (~ 100-200 ms).
+#
+# Le supervisor Octane spawn N workers FrankenPHP selon
+# `config/octane.php` ; en dev `--workers=auto --max-requests=500`
+# recycle le worker régulièrement pour débusquer les fuites mémoire
+# applicatives (cf. §H "Points de vigilance Octane" du brief j3-laravel).
+CMD ["sh", "-c", "php artisan optimize && exec php artisan octane:start \
+     --server=frankenphp \
+     --host=0.0.0.0 \
+     --port=8000 \
+     --workers=auto \
+     --max-requests=500"]

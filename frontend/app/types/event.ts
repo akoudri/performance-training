@@ -67,6 +67,20 @@ export interface SingleResponse<T> {
   data: T
 }
 
+/**
+ * Réponse paginée par curseur — format standardisé sur /api/v1/events
+ * (cf. solution/j3-laravel). Les autres endpoints listing restent flat
+ * en starter (volume <30 / utilisateur, pas de douleur mesurable).
+ */
+export interface CursorPaginatedResponse<T> {
+  data: T[]
+  meta: {
+    next_cursor: string | null
+    prev_cursor: string | null
+    per_page: number
+  }
+}
+
 export interface Order {
   id: number
   total_cents: number

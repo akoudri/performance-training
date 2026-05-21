@@ -12,8 +12,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * Colonnes attendues (cf. resonance-spec.md §5 écran 6) : code court, nom,
  * email, catégorie, statut.
  *
- * @perf-debt: chaîne ticket → order → user → email + ticket → category
- *             non eager-loadée → 2 SELECT par ligne. Résolu en J3.
+ * @perf-fix: la chaîne `ticket → order → user` et `ticket → ticketCategory`
+ *           est eager-loadée par le caller (`with(['order.user',
+ *           'ticketCategory'])`). Sur 7 000 tickets, on passe de
+ *           ~21 000 SELECT à 3.
  */
 class ParticipantResource extends JsonResource
 {
@@ -25,10 +27,8 @@ class ParticipantResource extends JsonResource
             // 8 premiers chars de l'UUID pour affichage compact.
             'code_short' => substr($this->code, 0, 8),
             'holder_name' => $this->holder_name,
-            // @perf-debt: ticket->order->user — N+1 garantie.
-            'email' => $this->order->user->email,
-            // @perf-debt: ticket->ticketCategory.
-            'category' => $this->ticketCategory->name,
+            'email' => $this->order?->user?->email,
+            'category' => $this->ticketCategory?->name,
             'status' => $this->status,
         ];
     }

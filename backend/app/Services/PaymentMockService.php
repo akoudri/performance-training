@@ -17,11 +17,12 @@ use Illuminate\Support\Str;
  * En annexe (cf. docs/annexes/stripe-integration.md) : le remplacement
  * par Stripe via PaymentIntents.
  *
- * @perf-debt: latence simulée *bloquante* dans le thread HTTP (le tunnel
- *             d'achat attend 800-1500ms avant la suite). En final, l'UX
- *             reste à 800-1500ms (réaliste) mais la génération PDF/email
- *             passe en queue (ShouldQueue), libérant le thread sur ~200ms.
- *             Cf. resonance-spec.md §9.
+ * @design: latence simulée *bloquante* (800-1500 ms) **préservée par
+ *          design**. C'est le bottleneck métier qu'on simule (un vrai
+ *          PSP type Stripe répond en 500-2000 ms). Ce qu'on déporte
+ *          en queue (PDF dompdf + SMTP), c'est la dette technique
+ *          *en aval* du paiement — pas le paiement lui-même.
+ *          Cf. brief j3-laravel §B.3 et docs/ateliers/j3-laravel.md.
  */
 class PaymentMockService
 {

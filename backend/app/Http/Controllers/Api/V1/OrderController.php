@@ -7,46 +7,45 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Order\StoreOrderRequest;
 use App\Http\Resources\OrderResource;
-use App\Mail\OrderConfirmationMail;
+use App\Jobs\GenerateTicketPdfJob;
+use App\Jobs\SendOrderConfirmationEmailJob;
 use App\Models\Order;
 use App\Models\Ticket;
 use App\Models\TicketCategory;
 use App\Services\PaymentMockService;
-use App\Services\TicketPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException;
 
 /**
- * Commandes : tunnel d'achat 100 % synchrone (starter).
+ * Commandes : tunnel d'achat asynchrone (j3-laravel).
  *
- * Flow étape 11 :
+ * Flow :
  *   1. Validation
  *   2. Transaction : création Order pending + Tickets, increment sold
- *   3. PaymentMockService::process — usleep 800-1500ms, marque paid
- *   4. Pour chaque ticket : TicketPdfService::generate (dompdf inline + upload MinIO)
- *   5. Mail::to($user)->send(new OrderConfirmationMail) — SMTP Mailpit synchrone
+ *   3. PaymentMockService::process — usleep 800-1500 ms, marque paid
+ *      (préservé : c'est le bottleneck métier réaliste qu'on simule, pas
+ *      une dette à supprimer).
+ *   4. Dispatch GenerateTicketPdfJob × N (queue Redis, supervisor Horizon)
+ *   5. Dispatch SendOrderConfirmationEmailJob (queue Redis)
  *
- * Coût attendu UX : ~3-5s entre POST et 201, conformément à spec §8.
+ * Coût UX attendu : ~ 1.0-1.4 s mock paiement (latence métier), ~ 50 ms
+ * d'overhead transaction + dispatch. Cible < 1.5 s vs 3-5 s starter.
  *
- * @perf-debt: latence simulée bloquante (800-1500ms) — préservée en final
- *             pour réalisme PSP, mais le reste du flow passe en queue.
- * @perf-debt: dompdf inline (200-500 ms / ticket) — résolu J3 par
- *             GenerateTicketPdfJob ShouldQueue.
- * @perf-debt: SMTP synchrone bloquant — résolu J3 par
- *             SendOrderConfirmationEmailJob ShouldQueue.
+ * @perf-fix: dompdf et SMTP déportés en queue (cf. App\Jobs\*).
  * @perf-debt: pas de SELECT FOR UPDATE SKIP LOCKED → race conditions
- *             possibles sur ticket_categories.sold en haute charge.
+ *             possibles sur ticket_categories.sold en haute charge
+ *             (visible sous k6 checkout-stress). Hors périmètre
+ *             j3-laravel (queues + Octane), à reprendre dans une
+ *             itération concurrence dédiée.
  */
 class OrderController extends Controller
 {
     public function __construct(
         private readonly PaymentMockService $payment,
-        private readonly TicketPdfService $pdf,
     ) {}
 
     public function store(StoreOrderRequest $request): JsonResponse
@@ -103,20 +102,23 @@ class OrderController extends Controller
             return $order;
         });
 
-        // 2) Process paiement (latence simulée 800-1500ms).
+        // 2) Process paiement (latence simulée 800-1500 ms — préservée).
         $order = $this->payment->process($order);
 
-        // 3) Génération PDF synchrone pour chaque ticket.
-        // @perf-debt: 200-500 ms × N tickets, en série, dans le thread HTTP.
+        // 3) Déport asynchrone : PDF tickets + mail confirmation.
+        // Les jobs s'exécutent dans le worker Horizon (queue Redis).
+        // Le client reçoit son 201 dès la fin du paiement.
         foreach ($order->tickets as $ticket) {
-            $this->pdf->generate($ticket);
+            GenerateTicketPdfJob::dispatch($ticket);
         }
+        SendOrderConfirmationEmailJob::dispatch($order, $user->email);
 
-        // 4) Envoi email confirmation synchrone (Mail::send PAS Mail::queue).
-        // @perf-debt: SMTP bloquant. Volontairement Mail::send (cf. §8 starter).
-        Mail::to($user->email)->send(new OrderConfirmationMail($order));
+        $order = $order->fresh([
+            'tickets.ticketCategory',
+            'tickets.eventSession.event',
+        ]);
 
-        return (new OrderResource($order->fresh('tickets')))
+        return (new OrderResource($order))
             ->response()
             ->setStatusCode(201);
     }
@@ -127,6 +129,9 @@ class OrderController extends Controller
             throw new AccessDeniedHttpException('Cette commande ne vous appartient pas.');
         }
 
-        return new OrderResource($order->load('tickets'));
+        return new OrderResource($order->load([
+            'tickets.ticketCategory',
+            'tickets.eventSession.event',
+        ]));
     }
 }

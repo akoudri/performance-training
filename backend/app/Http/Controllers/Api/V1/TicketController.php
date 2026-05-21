@@ -13,26 +13,23 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 /**
  * Tickets de l'utilisateur connecté.
  *
- * @perf-debt: pas de pagination sur /me/tickets — le starter renvoie tous
- *             les tickets du user (le visitor démo en compte ~31, mais un
- *             gros utilisateur peut en avoir des centaines). Cohérent avec
- *             le contrat §8 (rendu massif côté front, génération QR pour
- *             toute la liste). Résolu en branche solution/j2-frontend
- *             (cursor + virtualisation + génération QR à la demande).
- * @perf-debt: query SELECT * FROM tickets WHERE order_id IN (orders du user)
- *             sans eager load → N+1 sur ticketCategory + eventSession dans
- *             la Resource. Résolu en J3.
+ * @perf-fix: eager loading sur la chaîne `ticketCategory` +
+ *           `eventSession.event` pour éviter la cascade N+1 dans
+ *           TicketResource.
+ * @perf-debt: pas de pagination sur /me/tickets — volume typique <30
+ *             tickets par utilisateur, douleur marginale. Hors périmètre
+ *             j3-laravel (cf. note "Quand paginer ?" du docs/ateliers/
+ *             j3-laravel.md).
  */
 class TicketController extends Controller
 {
     public function index(Request $request): AnonymousResourceCollection
     {
-        // @perf-debt: get() sans limite — ramène tous les tickets du user
-        // en un seul payload (cf. doc-bloc).
-        $tickets = Ticket::whereIn(
-            'order_id',
-            $request->user()->orders()->select('id')
-        )
+        $tickets = Ticket::with(['ticketCategory', 'eventSession.event'])
+            ->whereIn(
+                'order_id',
+                $request->user()->orders()->select('id')
+            )
             ->orderBy('id', 'desc')
             ->get();
 

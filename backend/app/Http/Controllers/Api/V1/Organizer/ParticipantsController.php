@@ -15,17 +15,19 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 /**
  * Liste complète des participants (tickets valides) d'un événement.
  *
- * @perf-debt: pas de pagination — payload massif sur events stars
- *             (jusqu'à 8 000 lignes pour les events stars du seed
- *             réaliste). En production, paginer côté API + virtualiser
- *             côté front. Résolu en branche solution/j2-dashboard
- *             (pagination cursor) + solution/j2-frontend
- *             (vue-virtual-scroller).
+ * @perf-fix: chaîne `order.user` + `ticketCategory` eager-loadée. Sur
+ *           7 000 tickets de l'event star, on passe de ~21 003 SELECT
+ *           (1 + 3 × N) à 4 (sessions ids + tickets + orders + users
+ *           + categories factorisés via la map Eloquent).
  * @perf-debt: pas d'index sur tickets(event_session_id, created_at desc)
  *             — un événement à 5000 participants charge en seq scan + sort.
- *             Résolu en J3 atelier "postgres-indexes".
- * @perf-debt: pas de with('ticketCategory') ni de with('order.user') →
- *             la Resource déclenchera N+1 pour chaque ligne. Résolu en J3.
+ *             Résolu en solution/j3-postgres atelier "postgres-indexes".
+ * @perf-debt: pas de pagination — payload massif sur events stars (cf.
+ *             contrat §8). La virtualisation côté front (solution/j2-dashboard)
+ *             absorbe le DOM, mais le payload reste lourd. Hors périmètre
+ *             j3-laravel : la pagination cursor de cette branche cible
+ *             /api/v1/events uniquement (cf. note "Quand paginer ?" du
+ *             docs/ateliers/j3-laravel.md).
  */
 class ParticipantsController extends Controller
 {
@@ -38,7 +40,8 @@ class ParticipantsController extends Controller
 
         $sessionIds = $event->sessions()->pluck('id');
 
-        $query = Ticket::whereIn('event_session_id', $sessionIds)
+        $query = Ticket::with(['order.user', 'ticketCategory'])
+            ->whereIn('event_session_id', $sessionIds)
             ->where('status', Ticket::STATUS_VALID);
 
         if ($q = $request->string('q')->toString()) {
@@ -48,9 +51,6 @@ class ParticipantsController extends Controller
             $query->where('ticket_category_id', $categoryId);
         }
 
-        // @perf-debt: get() sans limite — ramène TOUS les tickets de
-        // l'event en un seul payload pour rendre le v-for non virtualisé
-        // démonstratif côté front (cf. spec §8 / §5 écran 6).
         $tickets = $query->orderBy('id', 'desc')->get();
 
         return response()->json([

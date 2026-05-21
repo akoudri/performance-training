@@ -11,11 +11,9 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Génère le PDF d'un ticket et le stocke dans MinIO.
  *
- * @perf-debt: dompdf est synchrone, lent (200-500 ms par PDF), bloquant le
- *             thread HTTP. Pour 4 tickets dans une commande, on ajoute
- *             ~1-2s au tunnel d'achat. En final, on dispatch un
- *             GenerateTicketPdfJob en queue Redis (cf. spec §9), libérant
- *             le thread immédiatement après checkout.
+ * @perf-fix: appelé depuis `App\Jobs\GenerateTicketPdfJob` (queue Redis,
+ *           supervisor Horizon). Plus de blocage du thread HTTP par
+ *           dompdf (200-500 ms / ticket).
  */
 class TicketPdfService
 {
@@ -24,12 +22,12 @@ class TicketPdfService
      */
     public function generate(Ticket $ticket): string
     {
-        // @perf-debt: vue Blade compilée à chaque appel (pas de view:cache
-        // en starter — cf. spec §8). Résolu par `php artisan optimize` en J3.
         $pdf = Pdf::loadView('pdf.ticket', [
             'ticket' => $ticket,
             'order' => $ticket->order,
-            // @perf-debt: chargement à la demande des relations → 3 SELECT.
+            // Lazy-loading des relations toléré ici : on tourne dans le
+            // worker Horizon (hors thread HTTP), 3-4 SELECT ajoutés sont
+            // négligeables vs le coût dompdf lui-même (~ 200 ms).
             'category' => $ticket->ticketCategory,
             'session' => $ticket->eventSession,
             'event' => $ticket->eventSession->event,

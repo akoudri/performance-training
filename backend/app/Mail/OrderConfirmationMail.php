@@ -14,14 +14,15 @@ use Illuminate\Queue\SerializesModels;
 /**
  * Confirmation de commande envoyée APRÈS paiement.
  *
- * **NOTE STARTER** : ce Mailable n'implémente **pas** ShouldQueue, donc
- * Mail::to(...)->send($mail) est synchrone et bloque le thread HTTP. C'est
- * un choix pédagogique explicite (Q3 utilisateur) : on veut sentir le
- * coût UX du tunnel synchrone.
+ * Le Mailable lui-même reste synchrone (pas de `ShouldQueue` ici), mais
+ * c'est `App\Jobs\SendOrderConfirmationEmailJob` qui est dispatché depuis
+ * `OrderController@store`. C'est le job qui implémente ShouldQueue, le
+ * Mailable est juste son payload — pattern explicite pour qu'un lecteur
+ * voie immédiatement, depuis le contrôleur, le déport asynchrone (vs un
+ * `ShouldQueue` "magique" sur le Mailable).
  *
- * @perf-debt: envoi SMTP bloquant — résolu en J3 atelier
- *             "laravel-redis-queues" en ajoutant ShouldQueue + dispatch
- *             via Mail::to($u)->queue($mail).
+ * @perf-fix: déport via SendOrderConfirmationEmailJob (queue Redis,
+ *           supervisor Horizon).
  */
 class OrderConfirmationMail extends Mailable
 {

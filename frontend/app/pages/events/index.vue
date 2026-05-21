@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Event, EventCategory } from '~/types/event'
+import type { CursorPaginatedResponse, Event, EventCategory } from '~/types/event'
 import EventCard from '~/components/EventCard.vue'
 import { categoryLabel } from '~/utils/format'
 
@@ -33,34 +33,59 @@ const selectedCities = ref<string[]>(
 const sort = ref((route.query.sort as string) ?? 'date')
 
 const events = ref<Event[]>([])
+const nextCursor = ref<string | null>(null)
+const perPage = ref(20)
 const pending = ref(false)
+const loadingMore = ref(false)
 const error = ref<string | null>(null)
 
-function buildQuery() {
+function buildQuery(cursor: string | null = null) {
   return {
     q: q.value || undefined,
     category: selectedCategories.value.length ? selectedCategories.value : undefined,
     city: selectedCities.value.length ? selectedCities.value : undefined,
     sort: sort.value,
+    cursor: cursor ?? undefined,
   }
 }
 
-// L'endpoint /events ne paginait plus en starter (cf. spec §8) :
-// payload plat `{ data: Event[] }` avec tous les events publiés filtrés.
-async function fetchAll() {
+// @perf-fix: pagination cursor (per_page=20). On reset events sur change
+// de filtres, on append sur "Charger plus" (cf. resonance-spec.md §5
+// écran 2 — bouton qui appelle ?cursor=xxx).
+async function fetchFirstPage() {
   pending.value = true
   error.value = null
   try {
-    const data = await api<{ data: Event[] }>('/events', {
+    const data = await api<CursorPaginatedResponse<Event>>('/events', {
       query: buildQuery(),
     })
     events.value = data.data
+    nextCursor.value = data.meta?.next_cursor ?? null
+    perPage.value = data.meta?.per_page ?? 20
   }
   catch {
     error.value = 'Impossible de charger les résultats.'
   }
   finally {
     pending.value = false
+  }
+}
+
+async function loadMore() {
+  if (!nextCursor.value || loadingMore.value) return
+  loadingMore.value = true
+  try {
+    const data = await api<CursorPaginatedResponse<Event>>('/events', {
+      query: buildQuery(nextCursor.value),
+    })
+    events.value = [...events.value, ...data.data]
+    nextCursor.value = data.meta?.next_cursor ?? null
+  }
+  catch {
+    error.value = 'Impossible de charger la page suivante.'
+  }
+  finally {
+    loadingMore.value = false
   }
 }
 
@@ -75,10 +100,10 @@ function applyFilters() {
       sort: sort.value,
     },
   })
-  fetchAll()
+  fetchFirstPage()
 }
 
-await fetchAll()
+await fetchFirstPage()
 
 watch(() => route.query, () => {
   q.value = (route.query.q as string) ?? ''
@@ -89,7 +114,7 @@ watch(() => route.query, () => {
     ? (route.query.city as string[])
     : route.query.city ? [route.query.city as string] : []
   sort.value = (route.query.sort as string) ?? 'date'
-  fetchAll()
+  fetchFirstPage()
 })
 </script>
 
@@ -173,6 +198,7 @@ watch(() => route.query, () => {
       <div class="flex items-center justify-between mb-4">
         <h1 class="text-2xl font-bold">
           {{ events.length }} événement<span v-if="events.length > 1">s</span>
+          <span v-if="nextCursor" class="text-sm font-normal text-slate-500">(page {{ Math.ceil(events.length / perPage) }})</span>
         </h1>
       </div>
 
@@ -187,6 +213,17 @@ watch(() => route.query, () => {
       <p v-if="pending" class="mt-8 text-center text-slate-500 text-sm">
         Chargement…
       </p>
+
+      <div v-if="!pending && nextCursor" class="mt-8 flex justify-center">
+        <button
+          type="button"
+          class="rounded-md bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white px-6 py-2 text-sm font-medium"
+          :disabled="loadingMore"
+          @click="loadMore"
+        >
+          {{ loadingMore ? 'Chargement…' : 'Charger plus' }}
+        </button>
+      </div>
     </section>
   </div>
 </template>

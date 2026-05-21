@@ -8,9 +8,9 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @perf-debt: relations ticketCategory + eventSession + event (via session)
- *             lues sans whenLoaded() → cascade de N+1 sur la liste tickets.
- *             Résolu en J3.
+ * @perf-fix: relations sérialisées uniquement quand eager-loadées
+ *            (whenLoaded). Caller doit poser `with(['ticketCategory',
+ *            'eventSession.event'])` sur la query qui sert cette Resource.
  */
 class TicketResource extends JsonResource
 {
@@ -23,17 +23,16 @@ class TicketResource extends JsonResource
             'holder_name' => $this->holder_name,
             'status' => $this->status,
             'pdf_path' => $this->pdf_path,
-            // @perf-debt: 3 SELECT par ticket (category, session, session.event).
-            'ticket_category' => new TicketCategoryResource($this->ticketCategory),
-            'event_session' => [
+            'ticket_category' => new TicketCategoryResource($this->whenLoaded('ticketCategory')),
+            'event_session' => $this->whenLoaded('eventSession', fn () => [
                 'id' => $this->eventSession->id,
                 'starts_at' => $this->eventSession->starts_at?->toIso8601String(),
-                'event' => [
+                'event' => $this->eventSession->relationLoaded('event') ? [
                     'id' => $this->eventSession->event->id,
                     'slug' => $this->eventSession->event->slug,
                     'title' => $this->eventSession->event->title,
-                ],
-            ],
+                ] : null,
+            ]),
         ];
     }
 }

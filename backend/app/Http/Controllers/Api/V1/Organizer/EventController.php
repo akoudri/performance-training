@@ -12,18 +12,15 @@ use App\Models\Event;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * CRUD événements pour l'organisateur.
  *
- * @perf-debt: pas de pagination sur la liste — le starter renvoie tous les
- *             events de l'organizer (jusqu'à 75 sur le seed réaliste, peut
- *             monter avec le temps). Résolu en branche solution/j2-frontend
- *             (cursor + UI paginée).
- * @perf-debt: pas de with() sur sessions/media — N+1 dans les Resources.
- *             Résolu en J3.
+ * @perf-fix: eager loading via `with([...])` sur les relations exposées
+ *           par EventResource. Plus de N+1 sur organizer/media.
  */
 class EventController extends Controller
 {
@@ -31,9 +28,11 @@ class EventController extends Controller
     {
         $organizerId = $this->organizerId($request);
 
-        // @perf-debt: get() sans limite — ramène tous les events de
-        // l'organizer en un seul payload (cf. doc-bloc).
-        $events = Event::where('organizer_id', $organizerId)
+        $events = Event::with([
+            'organizer',
+            'media' => fn ($q) => $q->orderBy('position'),
+        ])
+            ->where('organizer_id', $organizerId)
             ->orderBy('updated_at', 'desc')
             ->get();
 
@@ -53,6 +52,9 @@ class EventController extends Controller
             'status' => $request->string('status', Event::STATUS_DRAFT),
             'published_at' => $request->string('status') === Event::STATUS_PUBLISHED ? now() : null,
         ]);
+        $event->load(['organizer', 'media' => fn ($q) => $q->orderBy('position')]);
+
+        $this->invalidateCaches($event);
 
         return (new EventResource($event))->response()->setStatusCode(201);
     }
@@ -60,6 +62,11 @@ class EventController extends Controller
     public function show(Request $request, Event $event): EventResource
     {
         $this->authorizeOwnership($request, $event);
+        $event->load([
+            'organizer',
+            'media' => fn ($q) => $q->orderBy('position'),
+            'sessions.ticketCategories',
+        ]);
 
         return new EventResource($event);
     }
@@ -73,6 +80,9 @@ class EventController extends Controller
             $event->published_at = now();
         }
         $event->save();
+        $event->load(['organizer', 'media' => fn ($q) => $q->orderBy('position')]);
+
+        $this->invalidateCaches($event);
 
         return new EventResource($event);
     }
@@ -84,7 +94,27 @@ class EventController extends Controller
         // Soft-archive plutôt que delete (cf. spec §6 "DELETE → Archiver").
         $event->update(['status' => Event::STATUS_ARCHIVED]);
 
+        $this->invalidateCaches($event);
+
         return response()->json(null, 204);
+    }
+
+    /**
+     * Invalide le cache des endpoints publics impactés par un write organizer.
+     *
+     * - `events` : index public + listings filtrés + show + sessions (tous
+     *   les entries tagués `events` partent en bloc — coarse mais simple).
+     * - `organizer:{id}` : KPIs et sales-chart du dashboard de l'organizer
+     *   propriétaire (active_events change sur publish/archive).
+     *
+     * Pourquoi tag-flush et pas key-by-key : la liste des clés possibles
+     * (filtres q/city/category/from sur l'index) est non bornée. Le tag
+     * permet une invalidation O(1) côté Redis.
+     */
+    private function invalidateCaches(Event $event): void
+    {
+        Cache::tags(['events'])->flush();
+        Cache::tags(["organizer:{$event->organizer_id}"])->flush();
     }
 
     private function organizerId(Request $request): int

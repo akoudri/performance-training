@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Event, EventCategory } from '~/types/event'
+import type { CursorPaginatedResponse, Event, EventCategory } from '~/types/event'
 import EventCard from '~/components/EventCard.vue'
 import { categoryLabel } from '~/utils/format'
 
@@ -8,22 +8,19 @@ useHead({ title: 'Resonance — billetterie d\'événements' })
 
 const api = useApi()
 
-// 1 fetch global pour la home — pas de mémoization, refetch à chaque mount.
-// @perf-debt: pas de cache (ni Redis backend, ni ISR Nuxt). Résolu en J1
-// (CDN cache + ISR) et J3 (Redis cache).
-// @perf-debt: l'endpoint /events ne paginant plus en starter, le payload
-// contient TOUS les events publiés (1 200 sur le seed réaliste). On ne
-// consomme que les 21 premiers via slice — gaspillage massif côté réseau
-// et parsing JSON. Résolu en branche solution/j2-frontend.
-const { data, pending, error } = await useAsyncData<{ data: Event[] }>(
+// @perf-fix: /events renvoie désormais 20 events par page (cursor) au lieu
+// de 1 200. Pour la home on consomme tout juste la 1re page (hero + 8
+// "cette semaine" + 11 "populaires"), pas besoin de pagination ici.
+// Caching côté Redis backend (TTL 60s) — relevant SWR/ISR Nuxt = J1.
+const { data, pending, error } = await useAsyncData<CursorPaginatedResponse<Event>>(
   'home-events',
-  () => api<{ data: Event[] }>('/events'),
+  () => api<CursorPaginatedResponse<Event>>('/events'),
 )
 
 const events = computed<Event[]>(() => data.value?.data ?? [])
 const hero = computed<Event | undefined>(() => events.value[0])
 const thisWeek = computed<Event[]>(() => events.value.slice(1, 9))
-const popular = computed<Event[]>(() => events.value.slice(9, 21))
+const popular = computed<Event[]>(() => events.value.slice(9, 20))
 
 const CATEGORIES: EventCategory[] = [
   'concert', 'festival', 'theater', 'conference', 'exhibition',

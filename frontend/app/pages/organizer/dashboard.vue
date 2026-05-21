@@ -24,21 +24,15 @@ interface SalesPoint {
   revenue_cents: number
 }
 
-// @perf-debt: un seul `ref` global qui contient TOUT l'état du dashboard
-// (KPIs, courbe de ventes, table d'events). Chaque tick de polling
-// remplace l'objet entier → invalidation Vue de l'arbre complet, perf
-// catastrophique avec polling 10s. Résolu en J2 atelier "j2-dashboard"
-// (refs ciblés + shallowRef + v-memo).
-interface DashboardState {
-  stats: Stats | null
-  salesChart: SalesPoint[]
-  events: Event[]
-}
-const dashboardState = ref<DashboardState>({
-  stats: null,
-  salesChart: [],
-  events: [],
-})
+// @perf-fix: state éclaté en refs ciblés au lieu d'un seul ref global.
+// Chaque tick de polling met à jour les refs indépendamment, ce qui
+// limite l'invalidation Vue aux fragments du template qui lisent
+// vraiment chaque ref. `salesChart` et `events` sont en `shallowRef`
+// car on remplace l'array entier (pas de mutation interne) — Vue ne
+// rend pas ces tableaux profondément réactifs (pas de Proxy par item).
+const stats = ref<Stats | null>(null)
+const salesChart = shallowRef<SalesPoint[]>([])
+const events = shallowRef<Event[]>([])
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -50,12 +44,11 @@ async function loadAll() {
       api<{ data: SalesPoint[] }>('/organizer/sales-chart'),
       api<{ data: Event[] }>('/organizer/events'),
     ])
-    // @perf-debt: réassignation complète → re-render total Vue.
-    dashboardState.value = {
-      stats: statsResp.data,
-      salesChart: chartResp.data,
-      events: eventsResp.data,
-    }
+    // @perf-fix: trois assignations indépendantes → seuls les fragments
+    // qui lisent chaque ref sont invalidés, pas l'arbre complet.
+    stats.value = statsResp.data
+    salesChart.value = chartResp.data
+    events.value = eventsResp.data
   }
   catch (e) {
     error.value = (e as Error).message ?? 'Erreur de chargement.'
@@ -67,19 +60,21 @@ async function loadAll() {
 
 // Équivalent du `{ server: false }` de useAsyncData : on déclenche le fetch
 // dans `onMounted` (côté client uniquement). Au render initial — SSR comme
-// CSR — `dashboardState` est dans son état initial vide ; les deux rendus
-// matchent donc et il n'y a pas de mismatch d'hydratation. Le contenu réel
-// arrive après le mount, quand `plugins/auth.client.ts` a peuplé Pinia
-// avec le Bearer token.
+// CSR — `stats`, `salesChart`, `events` sont dans leur état initial vide ;
+// les deux rendus matchent donc et il n'y a pas de mismatch d'hydratation.
+// Le contenu réel arrive après le mount, quand `plugins/auth.client.ts` a
+// peuplé Pinia avec le Bearer token.
 
-// Polling 10s (cf. spec §5 écran 5).
-let pollHandle: ReturnType<typeof setInterval> | null = null
+// @perf-fix: polling 10s (cf. spec §5 écran 5) avec cleanup attaché au
+// scope du composant via `onScopeDispose`. Plus besoin d'une variable
+// mutable hors-scope pour stocker le handle ni d'un `onBeforeUnmount`
+// séparé : le timer est disposé automatiquement au unmount, et tout
+// effet futur (useXxx composable, watchEffect imbriqué) hériterait du
+// même scope sans rebrancher manuellement le cleanup.
 onMounted(() => {
   loadAll()
-  pollHandle = setInterval(loadAll, 10_000)
-})
-onBeforeUnmount(() => {
-  if (pollHandle) clearInterval(pollHandle)
+  const id = setInterval(loadAll, 10_000)
+  onScopeDispose(() => clearInterval(id))
 })
 
 // ---- Chart.js : courbe ventes 30j --------------------------------------
@@ -88,7 +83,7 @@ let chartInstance: Chart | null = null
 
 function renderChart() {
   if (!chartCanvas.value) return
-  const points = dashboardState.value.salesChart
+  const points = salesChart.value
   if (chartInstance) {
     chartInstance.data.labels = points.map(p => p.day.slice(0, 10))
     chartInstance.data.datasets[0]!.data = points.map(p => p.revenue_cents / 100)
@@ -117,9 +112,11 @@ function renderChart() {
   })
 }
 
-watch(() => dashboardState.value.salesChart, () => renderChart(), { immediate: false })
-onMounted(() => renderChart())
-onBeforeUnmount(() => chartInstance?.destroy())
+watch(salesChart, () => renderChart(), { immediate: false })
+onMounted(() => {
+  renderChart()
+  onScopeDispose(() => chartInstance?.destroy())
+})
 </script>
 
 <template>
@@ -136,13 +133,13 @@ onBeforeUnmount(() => chartInstance?.destroy())
     </p>
 
     <!-- KPIs -->
-    <div v-if="dashboardState.stats" class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+    <div v-if="stats" class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 mb-8">
       <div class="rounded-lg bg-white p-5 border border-slate-200">
         <p class="text-xs uppercase text-slate-500 mb-1">
           Ventes aujourd'hui
         </p>
         <p class="text-2xl font-bold">
-          {{ dashboardState.stats.today_orders.toLocaleString('fr-FR') }}
+          {{ stats.today_orders.toLocaleString('fr-FR') }}
         </p>
       </div>
       <div class="rounded-lg bg-white p-5 border border-slate-200">
@@ -150,7 +147,7 @@ onBeforeUnmount(() => chartInstance?.destroy())
           Revenus du mois
         </p>
         <p class="text-2xl font-bold">
-          {{ formatPrice(dashboardState.stats.month_revenue_cents) }}
+          {{ formatPrice(stats.month_revenue_cents) }}
         </p>
       </div>
       <div class="rounded-lg bg-white p-5 border border-slate-200">
@@ -158,7 +155,7 @@ onBeforeUnmount(() => chartInstance?.destroy())
           Taux de remplissage
         </p>
         <p class="text-2xl font-bold">
-          {{ Math.round(dashboardState.stats.fill_rate * 100) }} %
+          {{ Math.round(stats.fill_rate * 100) }} %
         </p>
       </div>
       <div class="rounded-lg bg-white p-5 border border-slate-200">
@@ -166,7 +163,7 @@ onBeforeUnmount(() => chartInstance?.destroy())
           Événements actifs
         </p>
         <p class="text-2xl font-bold">
-          {{ dashboardState.stats.active_events }}
+          {{ stats.active_events }}
         </p>
       </div>
     </div>
@@ -212,12 +209,15 @@ onBeforeUnmount(() => chartInstance?.destroy())
           </tr>
         </thead>
         <tbody>
-          <!-- @perf-debt: pas de v-memo sur les rows — chaque tick de
-               polling re-render TOUTES les lignes (même quand rien n'a
-               changé). Résolu en J2 atelier "j2-dashboard". -->
+          <!-- @perf-fix: v-memo sur les champs réellement lus par le row.
+               Tant que ces 4 valeurs sont identiques d'un tick de polling
+               au suivant, Vue saute entièrement le diff de ce <tr> et
+               de ses enfants — coût marginal du polling sur la table
+               réduit à zéro pour les lignes inchangées. -->
           <tr
-            v-for="ev in dashboardState.events.slice(0, 12)"
+            v-for="ev in events.slice(0, 12)"
             :key="ev.id"
+            v-memo="[ev.id, ev.title, ev.city, ev.status]"
             class="border-t border-slate-100"
           >
             <td class="px-5 py-2">

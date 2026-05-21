@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { RecycleScroller } from 'vue-virtual-scroller'
+import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
+
 definePageMeta({
   layout: 'organizer',
   middleware: ['auth', 'organizer'],
@@ -21,7 +24,11 @@ interface Participant {
 const search = ref('')
 const categoryFilter = ref('')
 
-const participants = ref<Participant[]>([])
+// @perf-fix: shallowRef sur la collection — on remplace le tableau
+// entier dans `fetchAll()`, pas de mutation par item. Évite le coût
+// de réactivité profonde Vue (Proxy par item × 7000 = ~50 ms de mount
+// gratuit avant même le rendu DOM).
+const participants = shallowRef<Participant[]>([])
 const pending = ref(false)
 const error = ref<string | null>(null)
 
@@ -132,53 +139,87 @@ function exportCsv() {
     </p>
 
     <!--
-      @perf-debt: rendu en `v-for` direct de TOUTES les lignes
-      (jusqu'à 5000+). Pas de virtualisation, pas de pagination UI,
-      pas de v-memo. Le DOM explose, INP > 500 ms quand on tape dans la
-      recherche. C'est le travail de la branche solution/j2-dashboard
-      (vue-virtual-scroller + cursor pagination + index Postgres en J3).
+      @perf-fix: virtualisation via vue-virtual-scroller.
+      RecycleScroller ne monte qu'une vingtaine de rows (viewport +
+      buffer), recyclées au scroll. La structure <table>/<tr> est
+      remplacée par une grille CSS (5 colonnes fixes) car v-virtual-scroller
+      gère le positionnement absolu de ses items et n'est pas compatible
+      avec la sémantique <tbody>. Convention de comptage DOM : chaque
+      ligne porte `data-row`, le selector `[data-row]` mesure le nombre
+      de rows réellement dans le DOM (cf. `docs/benchmarks/README.md`).
     -->
-    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <table class="w-full text-sm">
-        <thead class="bg-slate-50 text-left">
-          <tr>
-            <th class="px-4 py-2 font-medium text-slate-600">
-              Code
-            </th>
-            <th class="px-4 py-2 font-medium text-slate-600">
-              Nom
-            </th>
-            <th class="px-4 py-2 font-medium text-slate-600">
-              Email
-            </th>
-            <th class="px-4 py-2 font-medium text-slate-600">
-              Catégorie
-            </th>
-            <th class="px-4 py-2 font-medium text-slate-600">
-              Statut
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="p in participants" :key="p.id" class="border-t border-slate-100">
-            <td class="px-4 py-1 font-mono text-xs">
-              {{ p.code_short }}
-            </td>
-            <td class="px-4 py-1">
-              {{ p.holder_name }}
-            </td>
-            <td class="px-4 py-1 text-slate-500">
-              {{ p.email }}
-            </td>
-            <td class="px-4 py-1 text-slate-500">
-              {{ p.category }}
-            </td>
-            <td class="px-4 py-1">
-              {{ p.status }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+      <!-- En-tête en grille pour aligner les colonnes du body virtualisé. -->
+      <div
+        role="row"
+        class="participants-grid bg-slate-50 text-left text-sm font-medium text-slate-600"
+      >
+        <div role="columnheader" class="px-4 py-2">
+          Code
+        </div>
+        <div role="columnheader" class="px-4 py-2">
+          Nom
+        </div>
+        <div role="columnheader" class="px-4 py-2">
+          Email
+        </div>
+        <div role="columnheader" class="px-4 py-2">
+          Catégorie
+        </div>
+        <div role="columnheader" class="px-4 py-2">
+          Statut
+        </div>
+      </div>
+
+      <!-- Corps virtualisé. ClientOnly évite l'instanciation SSR
+           (RecycleScroller s'appuie sur ResizeObserver / window). -->
+      <ClientOnly>
+        <RecycleScroller
+          v-if="participants.length"
+          class="participants-scroller"
+          :items="participants"
+          :item-size="32"
+          key-field="id"
+          :buffer="200"
+        >
+          <template #default="{ item }">
+            <div
+              data-row
+              role="row"
+              class="participants-grid border-t border-slate-100 text-sm"
+            >
+              <div role="cell" class="px-4 py-1 font-mono text-xs truncate">
+                {{ item.code_short }}
+              </div>
+              <div role="cell" class="px-4 py-1 truncate">
+                {{ item.holder_name }}
+              </div>
+              <div role="cell" class="px-4 py-1 text-slate-500 truncate">
+                {{ item.email }}
+              </div>
+              <div role="cell" class="px-4 py-1 text-slate-500 truncate">
+                {{ item.category }}
+              </div>
+              <div role="cell" class="px-4 py-1">
+                {{ item.status }}
+              </div>
+            </div>
+          </template>
+        </RecycleScroller>
+      </ClientOnly>
     </div>
   </div>
 </template>
+
+<style scoped>
+.participants-grid {
+  display: grid;
+  grid-template-columns: 140px minmax(140px, 1fr) minmax(180px, 1.5fr) 130px 90px;
+  align-items: center;
+}
+
+.participants-scroller {
+  height: calc(100vh - 320px);
+  min-height: 480px;
+}
+</style>

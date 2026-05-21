@@ -19,7 +19,8 @@
     "qrcode": "latest",
     "vue": "latest",
     "vue-chartjs": "latest",
-    "vue-router": "latest"
+    "vue-router": "latest",
+    "vue-virtual-scroller": "latest"
   },
   "devDependencies": {
     "@nuxt/eslint": "latest",
